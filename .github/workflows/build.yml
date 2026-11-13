@@ -17,9 +17,9 @@ jobs:
           distribution: 'temurin'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@v3
         with:
-          packages: 'platform-tools'
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
 
       - name: Generate Project Files
         run: |
@@ -46,7 +46,7 @@ jobs:
           include(":app")
           EOF
 
-          # 2. build.gradle (Root)
+          # 2. build.gradle
           cat << 'EOF' > build.gradle
           plugins {
               id 'com.android.application' version '8.5.0' apply false
@@ -54,7 +54,7 @@ jobs:
           }
           EOF
 
-          # 3. app/build.gradle (تمت إزالة مكتبة material)
+          # 3. app/build.gradle
           cat << 'EOF' > app/build.gradle
           plugins {
               id 'com.android.application'
@@ -69,8 +69,8 @@ jobs:
                   applicationId "com.example.aimfox"
                   minSdk 26
                   targetSdk 34
-                  versionCode 1
-                  versionName "1.0"
+                  versionCode 2
+                  versionName "2.0"
               }
               buildTypes {
                   release {
@@ -92,23 +92,25 @@ jobs:
           }
           EOF
 
-          # 4. gradle.properties (لإجبار استخدام Java 17)
+          # 4. gradle.properties
           cat << 'EOF' > gradle.properties
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           android.useAndroidX=true
           android.nonTransitiveRClass=true
-          org.gradle.java.home=$JAVA_HOME
           EOF
 
-          # 5. AndroidManifest.xml
+          # 5. app/src/main/AndroidManifest.xml
           cat << 'EOF' > app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.VIBRATE" />
               <application
                   android:allowBackup="true"
+                  android:supportsRtl="true"
                   android:icon="@android:drawable/ic_menu_myplaces"
                   android:label="Aim Fox Overlay"
                   android:theme="@style/Theme.AppCompat.NoActionBar">
@@ -132,7 +134,7 @@ jobs:
           </manifest>
           EOF
 
-          # 6. activity_main.xml
+          # 6. app/src/main/res/layout/activity_main.xml
           cat << 'EOF' > app/src/main/res/layout/activity_main.xml
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -166,203 +168,432 @@ jobs:
                   android:textColor="#ffffff"
                   android:paddingHorizontal="32dp"
                   android:paddingVertical="14dp" />
+              <Button
+                  android:id="@+id/btnStop"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="12dp"
+                  android:text="⏹ إيقاف المدرب"
+                  android:backgroundTint="#30363d"
+                  android:textColor="#ffffff"
+                  android:paddingHorizontal="32dp"
+                  android:paddingVertical="14dp" />
               <TextView
                   android:layout_width="wrap_content"
                   android:layout_height="wrap_content"
-                  android:text="سيظهر التطبيق فوق لعبة 8 Ball Pool"
+                  android:text="سيظهر المدرب فوق التطبيقات الأخرى، ويمكنك تصغيره أو إغلاقه من داخله"
                   android:textColor="#8b949e"
                   android:textSize="12sp"
+                  android:gravity="center"
                   android:layout_marginTop="16dp" />
           </LinearLayout>
           EOF
 
-          # 7. MainActivity.kt
+          # 7. app/src/main/java/com/example/aimfox/MainActivity.kt
           cat << 'EOF' > app/src/main/java/com/example/aimfox/MainActivity.kt
           package com.example.aimfox
 
+          import android.Manifest
           import android.content.Intent
+          import android.content.pm.PackageManager
           import android.net.Uri
           import android.os.Build
           import android.os.Bundle
           import android.provider.Settings
           import android.widget.Button
+          import android.widget.Toast
           import androidx.appcompat.app.AppCompatActivity
+          import androidx.core.app.ActivityCompat
+          import androidx.core.content.ContextCompat
 
           class MainActivity : AppCompatActivity() {
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
                   setContentView(R.layout.activity_main)
 
-                  val btnStart = findViewById<Button>(R.id.btnStart)
-                  btnStart.setOnClickListener {
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                          if (!Settings.canDrawOverlays(this)) {
-                              val intent = Intent(
-                                  Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                  Uri.parse("package:" + packageName)
-                              )
-                              startActivity(intent)
-                          } else {
-                              startForegroundService(Intent(this, FloatingService::class.java))
-                          }
+                  if (Build.VERSION.SDK_INT >= 33 &&
+                      ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                      != PackageManager.PERMISSION_GRANTED
+                  ) {
+                      ActivityCompat.requestPermissions(
+                          this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1
+                      )
+                  }
+
+                  findViewById<Button>(R.id.btnStart).setOnClickListener {
+                      if (!Settings.canDrawOverlays(this)) {
+                          Toast.makeText(this, "فعّل إذن العرض فوق التطبيقات ثم ارجع واضغط بدء", Toast.LENGTH_LONG).show()
+                          startActivity(
+                              Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + packageName))
+                          )
                       } else {
-                          startService(Intent(this, FloatingService::class.java))
+                          ContextCompat.startForegroundService(this, Intent(this, FloatingService::class.java))
                       }
+                  }
+
+                  findViewById<Button>(R.id.btnStop).setOnClickListener {
+                      stopService(Intent(this, FloatingService::class.java))
                   }
               }
           }
           EOF
 
-          # 8. FloatingService.kt
+          # 8. app/src/main/java/com/example/aimfox/FloatingService.kt
           cat << 'EOF' > app/src/main/java/com/example/aimfox/FloatingService.kt
           package com.example.aimfox
 
-          import android.app.*
+          import android.app.Notification
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.PendingIntent
+          import android.app.Service
+          import android.content.Context
           import android.content.Intent
+          import android.content.pm.ServiceInfo
           import android.graphics.PixelFormat
           import android.os.Build
+          import android.os.Handler
           import android.os.IBinder
+          import android.os.Looper
+          import android.os.VibrationEffect
+          import android.os.Vibrator
           import android.view.Gravity
           import android.view.WindowManager
+          import android.webkit.JavascriptInterface
           import android.webkit.WebView
           import androidx.core.app.NotificationCompat
 
           class FloatingService : Service() {
 
-              private lateinit var windowManager: WindowManager
-              private lateinit var floatingView: WebView
+              private var windowManager: WindowManager? = null
+              private var webView: WebView? = null
               private lateinit var params: WindowManager.LayoutParams
+              private val main = Handler(Looper.getMainLooper())
+
+              private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+              inner class Bridge {
+                  @JavascriptInterface
+                  fun close() {
+                      main.post { stopSelf() }
+                  }
+
+                  @JavascriptInterface
+                  fun setMini(mini: Boolean) {
+                      main.post { applyMini(mini) }
+                  }
+
+                  @JavascriptInterface
+                  fun vibrate(ms: Int) {
+                      @Suppress("DEPRECATION")
+                      val v = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
+                      v.vibrate(VibrationEffect.createOneShot(ms.toLong(), VibrationEffect.DEFAULT_AMPLITUDE))
+                  }
+
+                  @JavascriptInterface
+                  fun getBest(key: String): Int =
+                      getSharedPreferences("aimfox", MODE_PRIVATE).getInt("best_" + key, 0)
+
+                  @JavascriptInterface
+                  fun saveBest(key: String, value: Int) {
+                      getSharedPreferences("aimfox", MODE_PRIVATE).edit().putInt("best_" + key, value).apply()
+                  }
+              }
+
+              private fun applyMini(mini: Boolean) {
+                  val view = webView ?: return
+                  if (mini) {
+                      params.width = dp(64)
+                      params.height = dp(64)
+                      params.gravity = Gravity.TOP or Gravity.END
+                      params.x = dp(8)
+                      params.y = dp(120)
+                  } else {
+                      params.width = WindowManager.LayoutParams.MATCH_PARENT
+                      params.height = WindowManager.LayoutParams.MATCH_PARENT
+                      params.gravity = Gravity.TOP or Gravity.START
+                      params.x = 0
+                      params.y = 0
+                  }
+                  windowManager?.updateViewLayout(view, params)
+              }
 
               override fun onCreate() {
                   super.onCreate()
-                  windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+                  startAsForeground()
 
+                  windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
                   params = WindowManager.LayoutParams(
                       WindowManager.LayoutParams.MATCH_PARENT,
                       WindowManager.LayoutParams.MATCH_PARENT,
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                          WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                      else
-                          WindowManager.LayoutParams.TYPE_PHONE,
-                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                          WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                       PixelFormat.TRANSLUCENT
                   )
                   params.gravity = Gravity.TOP or Gravity.START
 
-                  floatingView = WebView(this)
-                  floatingView.settings.javaScriptEnabled = true
-                  floatingView.settings.domStorageEnabled = true
-                  floatingView.setBackgroundColor(0x00000000)
+                  val view = WebView(applicationContext)
+                  view.settings.javaScriptEnabled = true
+                  view.settings.domStorageEnabled = true
+                  view.setBackgroundColor(0x00000000)
+                  view.addJavascriptInterface(Bridge(), "Android")
+                  view.loadDataWithBaseURL("https://aimfox.local/", getAimTrainerHTML(), "text/html", "UTF-8", null)
+                  try {
+                      windowManager?.addView(view, params)
+                      webView = view
+                  } catch (e: Exception) {
+                      stopSelf()
+                  }
+              }
 
-                  floatingView.loadDataWithBaseURL(null, getAimTrainerHTML(), "text/html", "UTF-8", null)
-                  windowManager.addView(floatingView, params)
-                  startForeground(1, createNotification())
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  if (intent?.action == ACTION_STOP) {
+                      stopSelf()
+                  }
+                  return START_NOT_STICKY
+              }
+
+              private fun startAsForeground() {
+                  val notification = createNotification()
+                  if (Build.VERSION.SDK_INT >= 34) {
+                      startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+                  } else {
+                      startForeground(1, notification)
+                  }
               }
 
               private fun createNotification(): Notification {
                   val channelId = "aimfox_overlay_channel"
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      val channel = NotificationChannel(channelId, "Aim Fox Overlay", NotificationManager.IMPORTANCE_MIN)
-                      val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-                      manager.createNotificationChannel(channel)
-                  }
+                  val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                  manager.createNotificationChannel(
+                      NotificationChannel(channelId, "Aim Fox Overlay", NotificationManager.IMPORTANCE_LOW)
+                  )
+                  val stopIntent = PendingIntent.getService(
+                      this, 0,
+                      Intent(this, FloatingService::class.java).setAction(ACTION_STOP),
+                      PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                  )
                   return NotificationCompat.Builder(this, channelId)
                       .setContentTitle("Aim Fox يعمل")
                       .setContentText("مدرب التصويب العائم نشط")
                       .setSmallIcon(android.R.drawable.ic_menu_compass)
+                      .setOngoing(true)
+                      .addAction(android.R.drawable.ic_delete, "إيقاف", stopIntent)
                       .build()
               }
 
               override fun onDestroy() {
                   super.onDestroy()
-                  if (::floatingView.isInitialized) {
-                      windowManager.removeView(floatingView)
+                  webView?.let {
+                      try { windowManager?.removeView(it) } catch (e: Exception) { }
+                      it.destroy()
                   }
+                  webView = null
               }
 
               override fun onBind(intent: Intent?): IBinder? = null
 
+              companion object {
+                  const val ACTION_STOP = "com.example.aimfox.STOP"
+              }
+
               private fun getAimTrainerHTML(): String {
                   return """
-                      <!DOCTYPE html>
-                      <html lang="ar" dir="rtl">
-                      <head>
-                      <meta charset="UTF-8">
-                      <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-                      <style>
-                          body { margin:0; padding:0; background: transparent; overflow: hidden; font-family: sans-serif; }
-                          #arena { position: absolute; inset: 0; cursor: crosshair; background: transparent; }
-                          .target { position: absolute; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #333 0 15%, #111 15% 30%, #000 30% 100%); border: 2px solid #ddd; box-shadow: 0 0 15px rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; font-family: serif; color: #fff; }
-                          .target::after { content: '8'; font-size: 24px; background: #fff; color: #000; border-radius: 50%; width: 40%; height: 40%; display: flex; align-items: center; justify-content: center; }
-                          .target.hit { animation: pop 0.25s forwards; }
-                          @keyframes pop { to { transform: scale(1.8); opacity: 0; } }
-                          #startOverlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,40,20,0.9); color: white; z-index: 10; }
-                          #startOverlay button { padding: 15px 40px; font-size: 20px; background: #ff5533; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 20px; }
-                          .hidden { display: none !important; }
-                      </style>
-                      </head>
-                      <body>
-                      <div id="startOverlay">
-                          <h2>🎱 مدرب تصويب البلياردو</h2>
-                          <p>اضغط على كرات 8 بأسرع ما يمكن</p>
-                          <button onclick="startGame()">▶ ابدأ التدريب</button>
-                      </div>
-                      <div id="arena" class="hidden"></div>
-                      <script>
-                          let running = false, score = 0, timeLeft = 30, timer = null, currentTarget = null;
-                          const arena = document.getElementById('arena');
-                          function startGame() {
-                              document.getElementById('startOverlay').classList.add('hidden');
-                              arena.classList.remove('hidden');
-                              running = true; score = 0; timeLeft = 30;
-                              timer = setInterval(() => { timeLeft--; if (timeLeft <= 0) endGame(); }, 1000);
-                              spawnTarget();
-                          }
-                          function spawnTarget() {
-                              if (!running) return;
-                              if (currentTarget) currentTarget.remove();
-                              const t = document.createElement('div');
-                              t.className = 'target';
-                              const size = 60;
-                              t.style.width = t.style.height = size + 'px';
-                              const r = arena.getBoundingClientRect();
-                              t.style.left = (Math.random() * (r.width - size - 20) + 10) + 'px';
-                              t.style.top = (Math.random() * (r.height - size - 20) + 10) + 'px';
-                              t.addEventListener('pointerdown', (e) => { e.stopPropagation(); hitTarget(t); });
-                              arena.appendChild(t); currentTarget = t;
-                          }
-                          function hitTarget(t) {
-                              if (!running) return;
-                              score++; t.classList.add('hit');
-                              setTimeout(() => { if (t.parentNode) t.remove(); spawnTarget(); }, 150);
-                          }
-                          function endGame() {
-                              running = false; clearInterval(timer);
-                              if (currentTarget) currentTarget.remove();
-                              arena.classList.add('hidden');
-                              document.getElementById('startOverlay').classList.remove('hidden');
-                              alert('انتهى الوقت! نتيجتك: ' + score);
-                          }
-                      </script>
-                      </body>
-                      </html>
+          <!DOCTYPE html>
+          <html lang="ar" dir="rtl">
+          <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+          <style>
+          *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+          html,body{margin:0;height:100%;background:transparent;overflow:hidden;font-family:sans-serif;color:#fff}
+          .screen{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,30,20,.93);text-align:center;padding:16px;z-index:10}
+          .screen h2{margin:0 0 8px;font-size:24px}
+          .screen p{margin:4px 0;color:#c9d1d9}
+          .btn{padding:12px 28px;font-size:18px;background:#ff5533;color:#fff;border:none;border-radius:10px;margin-top:14px}
+          .btn.alt{background:#30363d}
+          .row{display:flex;gap:8px;margin-top:12px}
+          .chip{padding:8px 16px;border-radius:20px;background:#21262d;color:#e6edf3;border:2px solid transparent;font-size:15px}
+          .chip.on{border-color:#ffb020;color:#ffb020}
+          .top{position:absolute;top:10px;left:10px;display:flex;gap:8px}
+          .icon{width:40px;height:40px;border-radius:50%;border:none;background:#30363d;color:#fff;font-size:18px}
+          #hud{position:absolute;top:0;left:0;right:0;height:48px;display:none;align-items:center;justify-content:space-between;padding:0 10px;background:rgba(0,0,0,.55);font-size:14px;z-index:5}
+          #hud .icon{width:34px;height:34px;font-size:15px}
+          #arena{position:absolute;inset:0;display:none}
+          .target{position:absolute;border-radius:50%;background:radial-gradient(circle at 35% 35%,#333 0 15%,#111 15% 30%,#000 30% 100%);border:2px solid #ddd;box-shadow:0 0 15px rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;touch-action:none}
+          .target::after{content:'8';font-size:12px;font-weight:bold;background:#fff;color:#000;border-radius:50%;width:40%;height:40%;display:flex;align-items:center;justify-content:center}
+          .target.hit{animation:pop .25s forwards}
+          @keyframes pop{to{transform:scale(1.8);opacity:0}}
+          #bubble{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:#ffb020;border-radius:50%;font-size:30px;z-index:20}
+          body.mini .screen,body.mini #hud,body.mini #arena{display:none !important}
+          body.mini #bubble{display:flex}
+          </style>
+          </head>
+          <body>
+          <div id="menu" class="screen">
+            <div class="top">
+              <button class="icon" onclick="mini(true)">➖</button>
+              <button class="icon" onclick="closeApp()">✕</button>
+            </div>
+            <h2>🎱 مدرب تصويب البلياردو</h2>
+            <p>اضغط على كرات 8 بأسرع ما يمكن</p>
+            <p id="best"></p>
+            <div class="row">
+              <button class="chip" id="d_easy" onclick="setDiff('easy')">سهل</button>
+              <button class="chip on" id="d_mid" onclick="setDiff('mid')">متوسط</button>
+              <button class="chip" id="d_hard" onclick="setDiff('hard')">صعب</button>
+            </div>
+            <button class="btn" onclick="startGame()">▶ ابدأ التدريب</button>
+          </div>
+          <div id="result" class="screen">
+            <div class="top">
+              <button class="icon" onclick="mini(true)">➖</button>
+              <button class="icon" onclick="closeApp()">✕</button>
+            </div>
+            <h2 id="rTitle">انتهى الوقت!</h2>
+            <p id="rScore" style="font-size:28px;color:#ffb020"></p>
+            <p id="rAcc"></p>
+            <p id="rRt"></p>
+            <p id="rCombo"></p>
+            <button class="btn" onclick="startGame()">🔁 العب مجدداً</button>
+            <button class="btn alt" onclick="toMenu()">القائمة</button>
+          </div>
+          <div id="hud">
+            <span id="sc"></span><span id="tm"></span><span id="cb"></span><span id="ac"></span>
+            <button class="icon" onclick="abortGame()">⏹</button>
+          </div>
+          <div id="arena"></div>
+          <div id="bubble" onclick="mini(false)">🦊</div>
+          <script>
+          var DIFF = { easy:{size:80,life:2200}, mid:{size:60,life:1500}, hard:{size:42,life:1000} };
+          var cur = 'mid', running = false, score = 0, hits = 0, misses = 0, combo = 0, bestCombo = 0;
+          var timeLeft = 30, tick = null, target = null, lifeTimer = null, spawnAt = 0, rts = [];
+          var arena = document.getElementById('arena');
+          function byId(id){ return document.getElementById(id); }
+          function vib(ms){ if (window.Android) { try { Android.vibrate(ms); } catch(e){} } }
+          function show(id){
+            byId('menu').style.display = 'none';
+            byId('result').style.display = 'none';
+            if (id) byId(id).style.display = 'flex';
+          }
+          function mini(on){
+            document.body.classList.toggle('mini', on);
+            if (running) abortGame();
+            if (window.Android) Android.setMini(on);
+          }
+          function closeApp(){ if (window.Android) Android.close(); }
+          function setDiff(d){
+            cur = d;
+            ['easy','mid','hard'].forEach(function(k){ byId('d_'+k).classList.toggle('on', k === d); });
+            refreshBest();
+          }
+          function refreshBest(){
+            var b = window.Android ? Android.getBest(cur) : 0;
+            byId('best').textContent = 'أفضل نتيجة: ' + b;
+          }
+          function upd(){
+            var total = hits + misses;
+            var acc = total ? Math.round(hits * 100 / total) : 100;
+            byId('sc').textContent = 'النقاط: ' + score;
+            byId('tm').textContent = '⏱ ' + timeLeft;
+            byId('cb').textContent = 'كومبو: ' + combo;
+            byId('ac').textContent = 'الدقة: ' + acc + '%';
+          }
+          function clearTarget(){
+            clearTimeout(lifeTimer);
+            if (target && target.parentNode) target.parentNode.removeChild(target);
+            target = null;
+          }
+          function startGame(){
+            running = true; score = 0; hits = 0; misses = 0; combo = 0; bestCombo = 0; timeLeft = 30; rts = [];
+            show(null);
+            byId('hud').style.display = 'flex';
+            arena.style.display = 'block';
+            upd();
+            clearInterval(tick);
+            tick = setInterval(function(){ timeLeft--; upd(); if (timeLeft <= 0) endGame(); }, 1000);
+            spawn();
+          }
+          function spawn(){
+            if (!running) return;
+            clearTarget();
+            var d = DIFF[cur];
+            var t = document.createElement('div');
+            t.className = 'target';
+            t.style.width = t.style.height = d.size + 'px';
+            var w = arena.clientWidth, h = arena.clientHeight;
+            t.style.left = (Math.random() * Math.max(10, w - d.size - 20) + 10) + 'px';
+            t.style.top = (60 + Math.random() * Math.max(10, h - d.size - 110)) + 'px';
+            t.addEventListener('pointerdown', function(e){ e.stopPropagation(); hit(t); });
+            arena.appendChild(t);
+            target = t;
+            spawnAt = Date.now();
+            lifeTimer = setTimeout(function(){ if (target === t) { miss(); spawn(); } }, d.life);
+          }
+          function hit(t){
+            if (!running || t !== target) return;
+            clearTimeout(lifeTimer);
+            rts.push(Date.now() - spawnAt);
+            hits++; combo++;
+            if (combo > bestCombo) bestCombo = combo;
+            score += 1 + Math.floor(combo / 5);
+            vib(15);
+            t.classList.add('hit');
+            target = null;
+            upd();
+            setTimeout(function(){ if (t.parentNode) t.parentNode.removeChild(t); spawn(); }, 120);
+          }
+          function miss(){ misses++; combo = 0; upd(); }
+          arena.addEventListener('pointerdown', function(){ if (running) { miss(); vib(40); } });
+          function stopAll(){
+            running = false;
+            clearInterval(tick);
+            clearTarget();
+            byId('hud').style.display = 'none';
+            arena.style.display = 'none';
+          }
+          function abortGame(){ stopAll(); toMenu(); }
+          function toMenu(){ refreshBest(); show('menu'); }
+          function endGame(){
+            stopAll();
+            var total = hits + misses;
+            var acc = total ? Math.round(hits * 100 / total) : 0;
+            var avg = rts.length ? Math.round(rts.reduce(function(a, b){ return a + b; }, 0) / rts.length) : 0;
+            var record = false;
+            if (window.Android) {
+              var b = Android.getBest(cur);
+              if (score > b) { Android.saveBest(cur, score); record = true; }
+            }
+            byId('rTitle').textContent = record ? '🏆 رقم قياسي جديد!' : 'انتهى الوقت!';
+            byId('rScore').textContent = 'النقاط: ' + score;
+            byId('rAcc').textContent = 'الدقة: ' + acc + '%  (إصابات ' + hits + ' / أخطاء ' + misses + ')';
+            byId('rRt').textContent = 'متوسط زمن الاستجابة: ' + avg + ' ملي ثانية';
+            byId('rCombo').textContent = 'أعلى كومبو: ' + bestCombo;
+            show('result');
+          }
+          toMenu();
+          </script>
+          </body>
+          </html>
                   """.trimIndent()
               }
           }
           EOF
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.7
 
       - name: Build with Gradle
         run: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          gradle assembleDebug
+          gradle assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: AimFox-Overlay-APK
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
