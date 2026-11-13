@@ -54,7 +54,7 @@ jobs:
           }
           EOF
 
-          # 3. app/build.gradle
+          # 3. app/build.gradle (تمت إزالة مكتبة material)
           cat << 'EOF' > app/build.gradle
           plugins {
               id 'com.android.application'
@@ -89,11 +89,18 @@ jobs:
           dependencies {
               implementation 'androidx.core:core-ktx:1.13.1'
               implementation 'androidx.appcompat:appcompat:1.7.0'
-              implementation 'com.google.android.material:material:1.12.0'
           }
           EOF
 
-          # 4. AndroidManifest.xml
+          # 4. gradle.properties (لإجبار استخدام Java 17)
+          cat << 'EOF' > gradle.properties
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          org.gradle.java.home=$JAVA_HOME
+          EOF
+
+          # 5. AndroidManifest.xml
           cat << 'EOF' > app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -125,7 +132,7 @@ jobs:
           </manifest>
           EOF
 
-          # 5. activity_main.xml
+          # 6. activity_main.xml
           cat << 'EOF' > app/src/main/res/layout/activity_main.xml
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -169,7 +176,7 @@ jobs:
           </LinearLayout>
           EOF
 
-          # 6. MainActivity.kt
+          # 7. MainActivity.kt
           cat << 'EOF' > app/src/main/java/com/example/aimfox/MainActivity.kt
           package com.example.aimfox
 
@@ -206,7 +213,7 @@ jobs:
           }
           EOF
 
-          # 7. FloatingService.kt
+          # 8. FloatingService.kt
           cat << 'EOF' > app/src/main/java/com/example/aimfox/FloatingService.kt
           package com.example.aimfox
 
