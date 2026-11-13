@@ -1,1342 +1,359 @@
-name: Build AI Video Player APK
-
+name: Build Aim Fox APK
 on:
   push:
-    branches: [ main, master ]
+    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
-  build_apk:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
           java-version: '17'
+          distribution: 'temurin'
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Accept Android Licenses
-        run: yes | flutter doctor --android-licenses
-
-      - name: Create Flutter Project & Install Packages
+      - name: Generate Project Files
         run: |
-          flutter create -a kotlin --org com.aivideoplayer --project-name ai_player_pro app_build
-          cd app_build
-          flutter pub add media_kit media_kit_video media_kit_libs_video file_picker speech_to_text tflite_flutter http path_provider shared_preferences
+          mkdir -p app/src/main/java/com/example/aimfox
+          mkdir -p app/src/main/res/layout
 
-      - name: Configure Android Manifest (Permissions + Intent Filters)
-        run: |
-          mkdir -p app_build/android/app/src/main
-          cat << 'XML_EOF' > app_build/android/app/src/main/AndroidManifest.xml
+          # 1. settings.gradle
+          cat << 'EOF' > settings.gradle
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "AimFoxOverlay"
+          include(":app")
+          EOF
+
+          # 2. build.gradle (Root)
+          cat << 'EOF' > build.gradle
+          plugins {
+              id 'com.android.application' version '8.5.0' apply false
+              id 'org.jetbrains.kotlin.android' version '2.0.0' apply false
+          }
+          EOF
+
+          # 3. app/build.gradle
+          cat << 'EOF' > app/build.gradle
+          plugins {
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+          }
+
+          android {
+              namespace 'com.example.aimfox'
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId "com.example.aimfox"
+                  minSdk 26
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = '17'
+              }
+          }
+
+          dependencies {
+              implementation 'androidx.core:core-ktx:1.13.1'
+              implementation 'androidx.appcompat:appcompat:1.7.0'
+              implementation 'com.google.android.material:material:1.12.0'
+          }
+          EOF
+
+          # 4. AndroidManifest.xml
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-          
-              <!-- الأذونات المطلوبة -->
-              <uses-permission android:name="android.permission.INTERNET"/>
-              <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
-              <uses-permission android:name="android.permission.WAKE_LOCK"/>
-              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
-              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
-          
-              <!-- مطلوب للتعرف على خدمات الصوت على أندرويد 11+ -->
-              <queries>
-                  <intent>
-                      <action android:name="android.speech.RecognitionService" />
-                  </intent>
-                  <intent>
-                      <action android:name="android.intent.action.TTS_SERVICE" />
-                  </intent>
-              </queries>
-          
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
               <application
-                  android:label="مشغل الفيديو الذكي AI Player"
-                  android:name="${applicationName}"
-                  android:icon="@mipmap/ic_launcher"
-                  android:usesCleartextTraffic="true"
-                  android:largeHeap="true">
-          
+                  android:allowBackup="true"
+                  android:icon="@android:drawable/ic_menu_myplaces"
+                  android:label="Aim Fox Overlay"
+                  android:theme="@style/Theme.AppCompat.NoActionBar">
                   <activity
                       android:name=".MainActivity"
-                      android:exported="true"
-                      android:launchMode="singleTop"
-                      android:theme="@style/LaunchTheme"
-                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
-                      android:hardwareAccelerated="true"
-                      android:windowSoftInputMode="adjustResize"
-                      android:requestLegacyExternalStorage="true">
-                      <meta-data
-                        android:name="io.flutter.embedding.android.NormalTheme"
-                        android:resource="@style/NormalTheme" />
+                      android:exported="true">
                       <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
-                      </intent-filter>
-                      <!-- فتح الفيديوهات من تطبيقات أخرى (مشاركة) -->
-                      <intent-filter>
-                          <action android:name="android.intent.action.VIEW"/>
-                          <category android:name="android.intent.category.DEFAULT"/>
-                          <data android:scheme="file"/>
-                          <data android:scheme="content"/>
-                          <data android:mimeType="video/*"/>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
                   </activity>
-          
-                  <meta-data
-                      android:name="flutterEmbedding"
-                      android:value="2" />
+                  <service
+                      android:name=".FloatingService"
+                      android:exported="false"
+                      android:foregroundServiceType="specialUse">
+                      <property
+                          android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                          android:value="Overlay for aim training" />
+                  </service>
               </application>
           </manifest>
-          XML_EOF
+          EOF
 
-      - name: Patch build.gradle for TFLite native libraries
-        run: |
-          if [ -f app_build/android/app/build.gradle.kts ]; then
-            sed -i '/^android {/a\    packaging { jniLibs.useLegacyPackaging = true }' app_build/android/app/build.gradle.kts
-          else
-            sed -i '/^android {/a\    packagingOptions { jniLibs.useLegacyPackaging = true }' app_build/android/app/build.gradle
-          fi
+          # 5. activity_main.xml
+          cat << 'EOF' > app/src/main/res/layout/activity_main.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:orientation="vertical"
+              android:gravity="center"
+              android:background="#0d1117"
+              android:padding="24dp">
+              <TextView
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:text="🦊 Aim Fox"
+                  android:textColor="#ffb020"
+                  android:textSize="28sp"
+                  android:textStyle="bold" />
+              <TextView
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:text="مدرب التصويب العائم"
+                  android:textColor="#e6edf3"
+                  android:textSize="16sp"
+                  android:layout_marginTop="8dp" />
+              <Button
+                  android:id="@+id/btnStart"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="32dp"
+                  android:text="▶ بدء التدريب العائم"
+                  android:backgroundTint="#ff5533"
+                  android:textColor="#ffffff"
+                  android:paddingHorizontal="32dp"
+                  android:paddingVertical="14dp" />
+              <TextView
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:text="سيظهر التطبيق فوق لعبة 8 Ball Pool"
+                  android:textColor="#8b949e"
+                  android:textSize="12sp"
+                  android:layout_marginTop="16dp" />
+          </LinearLayout>
+          EOF
 
-      - name: Write AI Player Engine (lib/main.dart - full AI version)
-        run: |
-          cat << 'DART_EOF' > app_build/lib/main.dart
-          // ╔══════════════════════════════════════════════════════════════════╗
-          // ║           AI PLAYER PRO — مشغل فيديو احترافي بالذكاء الاصطناعي   ║
-          // ║           ملف واحد كامل — جاهز للبناء على GitHub                ║
-          // ╚══════════════════════════════════════════════════════════════════╝
-          //
-          // 📦 pubspec.yaml المطلوب (ضعه بجانب ملف main.dart):
-          //
-          // name: ai_player_pro
-          // environment:
-          //   sdk: '>=3.0.0 <4.0.0'
-          // dependencies:
-          //   flutter:
-          //     sdk: flutter
-          //   media_kit: ^1.2.5
-          //   media_kit_video: ^1.2.5
-          //   media_kit_libs_video: ^1.0.5
-          //   file_picker: ^8.1.2
-          //   speech_to_text: ^7.0.0
-          //   tflite_flutter: ^0.10.4
-          //   http: ^1.2.2
-          //   path_provider: ^2.1.4
-          //   shared_preferences: ^2.3.2
-          // flutter:
-          //   uses-material-design: true
-          //   assets:
-          //     - assets/models/realesrgan.tflite   ← نموذج تحسين الجودة (اختياري)
-          //
-          // ▶️ التشغيل: flutter pub get && flutter run
-          //
-          // 🧠 الذكاء الاصطناعي المدمج:
-          //   • تحسين جودة الفيديو Real-ESRGAN عبر TFLite (يعمل محلياً بدون إنترنت)
-          //   • أوامر صوتية بالعربية (speech_to_text)
-          //   • ترجمة فورية بكل اللغات + إلغاء الترجمة الشامل
-          //   • فلاتر فيديو احترافية (Color Matrix)
-          
-          import 'dart:async';
-          import 'dart:io';
-          import 'dart:convert';
-          import 'dart:typed_data';
-          
-          import 'package:flutter/material.dart';
-          import 'package:flutter/services.dart';
-          import 'package:media_kit/media_kit.dart';
-          import 'package:media_kit_video/media_kit_video.dart';
-          import 'package:file_picker/file_picker.dart';
-          import 'package:speech_to_text/speech_to_text.dart' as stt;
-          
-          // مكتبة الذكاء الاصطناعي على الجهاز
-          import 'package:tflite_flutter/tflite_flutter.dart';
-          // الاتصال بالذكاء الاصطناعي السحابي + التخزين
-          import 'package:http/http.dart' as http;
-          import 'package:path_provider/path_provider.dart';
-          import 'package:shared_preferences/shared_preferences.dart';
-          
-          Future<void> main() async {
-            WidgetsFlutterBinding.ensureInitialized();
-            MediaKit.ensureInitialized();
-            await AiConfig.load(); // تحميل مفتاح المستخدم المخزّن محلياً
-            runApp(const AIPlayerPro());
-          }
-          
-          // ═══════════════════════════ التطبيق الرئيسي ═══════════════════════════
-          class AIPlayerPro extends StatelessWidget {
-            const AIPlayerPro({super.key});
-          
-            @override
-            Widget build(BuildContext context) {
-              return MaterialApp(
-                title: 'AI Player Pro',
-                debugShowCheckedModeBanner: false,
-                theme: ThemeData.dark().copyWith(
-                  scaffoldBackgroundColor: const Color(0xFF0A0A0F),
-                  primaryColor: const Color(0xFF00D4FF),
-                  colorScheme: const ColorScheme.dark(
-                    primary: Color(0xFF00D4FF),
-                    secondary: Color(0xFF7C4DFF),
-                    surface: Color(0xFF15151F),
-                  ),
-                ),
-                home: const HomeScreen(),
-              );
-            }
-          }
-          
-          // ═══════════════════════ شاشة الرئيسية / المكتبة ═══════════════════════
-          class HomeScreen extends StatefulWidget {
-            const HomeScreen({super.key});
-            @override
-            State<HomeScreen> createState() => _HomeScreenState();
-          }
-          
-          class _HomeScreenState extends State<HomeScreen> {
-            final List<String> recentFiles = [];
-          
-            static const supportedFormats = [
-              'mp4', 'mkv', 'avi', 'mov', 'webm', 'flv', 'ts', 'm4v',
-              'wmv', '3gp', 'mpg', 'mpeg', 'rmvb', 'vob', 'ogv', 'm2ts',
-            ];
-          
-            Future<void> _pickAndPlay() async {
-              final r = await FilePicker.platform.pickFiles(
-                type: FileType.custom,
-                allowedExtensions: supportedFormats,
-              );
-              final path = r?.files.single.path;
-              if (path != null) {
-                if (!recentFiles.contains(path)) recentFiles.insert(0, path);
-                setState(() {});
-                if (mounted) {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => PlayerScreen(filePath: path)),
-                  );
-                }
-              }
-            }
-          
-            @override
-            Widget build(BuildContext context) {
-              return Scaffold(
-                body: SafeArea(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Row(
-                          children: [
-                            const Expanded(
-                              child: Text('🎬 AI Player Pro',
-                                  style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.settings, color: Colors.white70),
-                              onPressed: () => Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                      builder: (_) => const SettingsScreen())),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: GestureDetector(
-                          onTap: _pickAndPlay,
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(28),
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                  colors: [Color(0xFF00D4FF), Color(0xFF7C4DFF)]),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: const Column(children: [
-                              Icon(Icons.folder_open, size: 48, color: Colors.white),
-                              SizedBox(height: 8),
-                              Text('فتح فيديو جديد',
-                                  style: TextStyle(
-                                      fontSize: 18, fontWeight: FontWeight.bold)),
-                              Text('MP4 MKV AVI MOV WEBM FLV TS RMVB...',
-                                  style:
-                                      TextStyle(color: Colors.white70, fontSize: 12)),
-                            ]),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 20),
-                        child: Text('آخر الفيديوهات',
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                      ),
-                      Expanded(
-                        child: recentFiles.isEmpty
-                            ? const Center(
-                                child: Text('لا توجد فيديوهات بعد',
-                                    style: TextStyle(color: Colors.white38)))
-                            : ListView.builder(
-                                itemCount: recentFiles.length,
-                                itemBuilder: (_, i) {
-                                  final f = recentFiles[i];
-                                  final exists = File(f).existsSync();
-                                  return ListTile(
-                                    leading: Container(
-                                      width: 56,
-                                      height: 40,
-                                      decoration: BoxDecoration(
-                                          color: const Color(0xFF15151F),
-                                          borderRadius: BorderRadius.circular(8)),
-                                      child: const Icon(Icons.movie,
-                                          color: Color(0xFF00D4FF)),
-                                    ),
-                                    title: Text(f.split('/').last,
-                                        maxLines: 1, overflow: TextOverflow.ellipsis),
-                                    subtitle: Text(
-                                      exists ? f : 'الملف غير موجود',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                          fontSize: 11, color: Colors.white38),
-                                    ),
-                                    onTap: exists
-                                        ? () => Navigator.push(
-                                              context,
-                                              MaterialPageRoute(
-                                                  builder: (_) =>
-                                                      PlayerScreen(filePath: f)),
-                                            )
-                                        : null,
-                                  );
-                                },
-                              ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }
-          }
-          
-          // ═════════════════════ 🧠 محرك الذكاء الاصطناعي ═════════════════════
-          
-          // ═══════════════ إعدادات الـ API (تُخزَّن محلياً على الهاتف) ═══════════════
-          class AiConfig {
-            static String apiKey = '';        // يضعه المستخدم من شاشة الإعدادات
-            static String baseUrl = 'https://openrouter.ai/api/v1';
-            static String chatModel = 'openai/gpt-4o-mini';
-            static String modelUrl =
-                'https://huggingface.co/AI-ModelScope/Real-ESRGAN-x2-TFLite/resolve/main/realesrgan_x2.tflite';
-          
-            static bool get ready => apiKey.isNotEmpty;
-          
-            static Future<void> load() async {
-              final p = await SharedPreferences.getInstance();
-              apiKey = p.getString('ai_key') ?? '';
-              baseUrl = p.getString('ai_base') ?? baseUrl;
-              chatModel = p.getString('ai_model') ?? chatModel;
-              modelUrl = p.getString('ai_model_url') ?? modelUrl;
-            }
-          
-            static Future<void> save() async {
-              final p = await SharedPreferences.getInstance();
-              await p.setString('ai_key', apiKey);
-              await p.setString('ai_base', baseUrl);
-              await p.setString('ai_model', chatModel);
-              await p.setString('ai_model_url', modelUrl);
-            }
-          
-            static Map<String, String> get headers => {
-                  'Authorization': 'Bearer $apiKey',
-                  'Content-Type': 'application/json',
-                  'HTTP-Referer': 'ai-player-pro',
-                };
-          }
-          
-          // ═══════════════ خدمة الذكاء الاصطناعي السحابي ═══════════════
-          class AIService {
-            /// ترجمة مجموعة أسطر ترجمة إلى اللغة المطلوبة عبر نموذج لغوي حقيقي
-            static Future<List<String>> translateBatch(
-                List<String> texts, String targetLang) async {
-              if (!AiConfig.ready || texts.isEmpty) return texts;
-              final langName = SubtitleEngine.languages[targetLang] ?? targetLang;
-              final numbered =
-                  texts.asMap().entries.map((e) => '${e.key + 1}|${e.value}').join('\n');
-              try {
-                final res = await http
-                    .post(
-                      Uri.parse('${AiConfig.baseUrl}/chat/completions'),
-                      headers: AiConfig.headers,
-                      body: jsonEncode({
-                        'model': AiConfig.chatModel,
-                        'messages': [
-                          {
-                            'role': 'system',
-                            'content':
-                                'You are a subtitle translator. Translate each line to $langName. '
-                                    'Keep the exact format "number|translation", one per line, no extra text.',
-                          },
-                          {'role': 'user', 'content': numbered},
-                        ],
-                        'temperature': 0.2,
-                      }),
-                    )
-                    .timeout(const Duration(seconds: 40));
-                if (res.statusCode != 200) return texts;
-                final data = jsonDecode(res.body);
-                final content = data['choices']?[0]?['message']?['content'] ?? '';
-                final out = List<String>.from(texts);
-                for (final line in content.split('\n')) {
-                  final i = line.indexOf('|');
-                  if (i <= 0) continue;
-                  final n = int.tryParse(line.substring(0, i).trim());
-                  if (n != null && n >= 1 && n <= out.length) {
-                    out[n - 1] = line.substring(i + 1).trim();
+          # 6. MainActivity.kt
+          cat << 'EOF' > app/src/main/java/com/example/aimfox/MainActivity.kt
+          package com.example.aimfox
+
+          import android.content.Intent
+          import android.net.Uri
+          import android.os.Build
+          import android.os.Bundle
+          import android.provider.Settings
+          import android.widget.Button
+          import androidx.appcompat.app.AppCompatActivity
+
+          class MainActivity : AppCompatActivity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContentView(R.layout.activity_main)
+
+                  val btnStart = findViewById<Button>(R.id.btnStart)
+                  btnStart.setOnClickListener {
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                          if (!Settings.canDrawOverlays(this)) {
+                              val intent = Intent(
+                                  Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                  Uri.parse("package:" + packageName)
+                              )
+                              startActivity(intent)
+                          } else {
+                              startForegroundService(Intent(this, FloatingService::class.java))
+                          }
+                      } else {
+                          startService(Intent(this, FloatingService::class.java))
+                      }
                   }
-                }
-                return out;
-              } catch (_) {
-                return texts;
               }
-            }
-          
-            /// تفريغ صوتي حقيقي: أرسل مقطعاً صوتياً من الفيديو لنموذج Whisper
-            /// (يتطلب مفتاح OpenAI أو خادم whisper متوافق — يُضبط من baseUrl)
-            static Future<List<SubtitleLine>> transcribe(
-                String videoPath, String targetLang) async {
-              // يستخرج الصوت عبر FFmpeg ثم يرفعه — يُفعَّل عند توفر مفتاح
-              throw UnimplementedError(
-                  'اربط خادم Whisper الخاص بك أو استخدم on-device whisper.cpp');
-            }
           }
-          
-          enum EnhanceLevel { off, hd, fullhd, k2, k4 }
-          
-          class AIEngine {
-            static final AIEngine instance = AIEngine._();
-            AIEngine._();
-          
-            Interpreter? _interpreter;
-            bool modelLoaded = false;
-            EnhanceLevel level = EnhanceLevel.off;
-            bool isProcessing = false;
-            double progress = 0;
-          
-            // تحميل نموذج Real-ESRGAN (إن وُجد) — يعمل محلياً بدون إنترنت
-            // تحميل النموذج: إن لم يوجد → يحمّله تلقائياً من الإنترنت ثم يشغّله محلياً
-            Future<void> loadModel() async {
-              try {
-                final dir = await getApplicationDocumentsDirectory();
-                final modelDir = Directory('${dir.path}/models');
-                if (!await modelDir.exists()) await modelDir.create(recursive: true);
-                final modelFile = File('${modelDir.path}/realesrgan.tflite');
-          
-                if (!await modelFile.exists()) {
-                  debugPrint('⬇️ جاري تنزيل نموذج التحسين...');
-                  final res = await http
-                      .get(Uri.parse(AiConfig.modelUrl))
-                      .timeout(const Duration(minutes: 5));
-                  if (res.statusCode == 200 && res.bodyBytes.length > 1000000) {
-                    await modelFile.writeAsBytes(res.bodyBytes);
-                    debugPrint('✅ اكتمل تنزيل النموذج (${(res.bodyBytes.length / 1048576).toStringAsFixed(1)} MB)');
-                  }
-                }
-          
-                if (await modelFile.exists()) {
-                  _interpreter = Interpreter.fromFile(modelFile);
-                  modelLoaded = true;
-                  debugPrint('🧠 نموذج Real-ESRGAN جاهز — تحسين حقيقي على الجهاز');
-                } else {
-                  modelLoaded = false;
-                  debugPrint('⚠️ تعذر تنزيل النموذج — وضع المعالجة الأساسي');
-                }
-              } catch (e) {
-                modelLoaded = false;
-                debugPrint('⚠️ خطأ في تحميل النموذج: $e');
-              }
-              notifyLoaded?.call();
-            }
-          
-            // callback لتحديث الواجهة بعد التحميل
-            void Function()? notifyLoaded;
-          
-            /// رفع دقة إطار حقيقي بالنموذج: [1, H, W, 3] → [1, H*s, W*s, 3]
-            Uint8List enhanceFrame(Uint8List frame, int h, int w, {int scale = 2}) {
-              if (_interpreter == null) return frame;
-              final outH = h * scale, outW = w * scale;
-              final input = _toTensor(frame, h, w);
-              final output =
-                  List.filled(1 * outH * outW * 3, 0.0).reshape([1, outH, outW, 3]);
-              _interpreter!.run(input, output);
-              return _toImage(output, outH, outW);
-            }
-          
-            List<List<List<List<double>>>> _toTensor(Uint8List f, int h, int w) {
-              final t = List.generate(
-                  1,
-                  (_) => List.generate(
-                      h,
-                      (y) => List.generate(
-                          w,
-                          (x) => List.generate(
-                              3,
-                              (c) => f[(y * w + x) * 3 + c] / 255.0))));
-              return t;
-            }
-          
-            Uint8List _toImage(List output, int h, int w) {
-              final out = Uint8List(h * w * 3);
-              for (int y = 0; y < h; y++) {
-                for (int x = 0; x < w; x++) {
-                  for (int c = 0; c < 3; c++) {
-                    out[(y * w + x) * 3 + c] =
-                        ((output[0][y][x][c] as double) * 255).clamp(0, 255).round();
-                  }
-                }
-              }
-              return out;
-            }
-          
-            Future<void> enhance(EnhanceLevel target) async {
-              isProcessing = true;
-              progress = 0;
-              level = target;
-              // محاكاة/معالجة الإطارات — في الواقع يمر كل إطار عبر enhanceFrame()
-              for (int i = 0; i <= 100; i += 4) {
-                await Future.delayed(const Duration(milliseconds: 50));
-                progress = i / 100;
-              }
-              isProcessing = false;
-            }
-          }
-          
-          
-          // ═════════════════════ ⚙️ شاشة إعدادات الذكاء الاصطناعي ═════════════════════
-          class SettingsScreen extends StatefulWidget {
-            const SettingsScreen({super.key});
-            @override
-            State<SettingsScreen> createState() => _SettingsScreenState();
-          }
-          
-          class _SettingsScreenState extends State<SettingsScreen> {
-            final _keyCtrl = TextEditingController(text: AiConfig.apiKey);
-            final _baseCtrl = TextEditingController(text: AiConfig.baseUrl);
-            final _modelCtrl = TextEditingController(text: AiConfig.chatModel);
-            final _modelUrlCtrl = TextEditingController(text: AiConfig.modelUrl);
-          
-            @override
-            Widget build(BuildContext context) {
-              return Scaffold(
-                appBar: AppBar(
-                  title: const Text('⚙️ إعدادات الذكاء الاصطناعي'),
-                  backgroundColor: const Color(0xFF0A0A0F),
-                ),
-                body: ListView(padding: const EdgeInsets.all(20), children: [
-                  _cardBox(
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const Row(children: [
-                        Icon(Icons.key, color: Color(0xFF00D4FF)),
-                        SizedBox(width: 8),
-                        Text('مفتاح الـ API', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      ]),
-                      const SizedBox(height: 4),
-                      const Text('يُخزَّن محلياً على جهازك فقط ولا يُرسل لأي جهة أخرى.',
-                          style: TextStyle(fontSize: 12, color: Colors.white54)),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _keyCtrl,
-                        obscureText: true,
-                        decoration: _input('sk-or-v1-...'),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(controller: _baseCtrl, decoration: _input('رابط الـ API (OpenRouter...)')),
-                      const SizedBox(height: 12),
-                      TextField(controller: _modelCtrl, decoration: _input('اسم النموذج (openai/gpt-4o-mini...)')),
-                    ]),
-                  ),
-                  const SizedBox(height: 14),
-                  _cardBox(
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const Row(children: [
-                        Icon(Icons.download, color: Color(0xFF7C4DFF)),
-                        SizedBox(width: 8),
-                        Text('نموذج تحسين الجودة', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      ]),
-                      const SizedBox(height: 4),
-                      const Text('يُنزَّل تلقائياً عند أول تشغيل ويعمل محلياً بدون إنترنت.',
-                          style: TextStyle(fontSize: 12, color: Colors.white54)),
-                      const SizedBox(height: 12),
-                      TextField(controller: _modelUrlCtrl, decoration: _input('رابط ملف .tflite')),
-                    ]),
-                  ),
-                  const SizedBox(height: 24),
-                  Container(
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(colors: [Color(0xFF00D4FF), Color(0xFF7C4DFF)]),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.transparent,
-                        shadowColor: Colors.transparent,
-                        padding: const EdgeInsets.symmetric(vertical: 15),
-                      ),
-                      icon: const Icon(Icons.save, color: Colors.white),
-                      label: const Text('💾 حفظ الإعدادات',
-                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
-                      onPressed: () async {
-                        AiConfig.apiKey = _keyCtrl.text.trim();
-                        AiConfig.baseUrl = _baseCtrl.text.trim();
-                        AiConfig.chatModel = _modelCtrl.text.trim();
-                        AiConfig.modelUrl = _modelUrlCtrl.text.trim();
-                        await AiConfig.save();
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                              content: Text('✅ تم الحفظ — الذكاء الاصطناعي جاهز الآن')));
-                        }
-                      },
-                    ),
-                  ),
-                ]),
-              );
-            }
-          
-            InputDecoration _input(String hint) => InputDecoration(
-                  hintText: hint,
-                  hintStyle: const TextStyle(color: Colors.white30, fontSize: 13),
-                  filled: true,
-                  fillColor: const Color(0xFF15151F),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                );
-          
-            Widget _cardBox({required Widget child}) => Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF15151F),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: const Color(0xFF00D4FF).withOpacity(0.25)),
-                  ),
-                  child: child,
-                );
-          }
-          
-          // ═════════════════════ 🎤 الأوامر الصوتية بالعربية ═════════════════════
-          class VoiceCommands {
-            static const commands = {
-              'حسن الفيديو': 'enhance',
-              'تحسين الجودة': 'enhance',
-              'شغل الفيديو': 'play',
-              'شغل': 'play',
-              'وقف': 'pause',
-              'ايقاف': 'pause',
-              'أكمل': 'resume',
-              'اكمل': 'resume',
-              'كبّر الصوت': 'vol_up',
-              'كبر الصوت': 'vol_up',
-              'صغّر الصوت': 'vol_down',
-              'صغر الصوت': 'vol_down',
-              'كامل الشاشة': 'fullscreen',
-              'الغي الترجمة': 'sub_off',
-              'إلغاء الترجمة': 'sub_off',
-            };
-          }
-          
-          // ═════════════════════ 💬 محرك الترجمة ═════════════════════
-          class SubtitleLine {
-            final Duration start, end;
-            final String text;
-            SubtitleLine(this.start, this.end, this.text);
-          }
-          
-          class SubtitleEngine {
-            List<SubtitleLine> lines = [];
-            int currentIndex = -1;
-            bool visible = true;
-            bool isEmbedded = false; // ترجمة محروقة داخل الفيديو
-            String language = 'ar';
-            Duration time = Duration.zero;
-          
-            static const languages = {
-              'ar': 'العربية', 'en': 'English', 'fr': 'Français', 'es': 'Español',
-              'de': 'Deutsch', 'tr': 'Türkçe', 'hi': 'हिन्दी', 'ja': '日本語',
-              'ko': '한국어', 'zh': '中文', 'ru': 'Русский', 'pt': 'Português',
-              'it': 'Italiano',
-            };
-          
-            void update(Duration t) {
-              time = t;
-              if (lines.isEmpty || !visible) return;
-              final idx = lines.indexWhere((l) => t >= l.start && t <= l.end);
-              if (idx != currentIndex) currentIndex = idx;
-            }
-          
-            Future<void> loadSrtFile(String path) async {
-              final content = await File(path).readAsString();
-              lines = _parse(content);
-              currentIndex = -1;
-            }
-          
-            /// ترجمة فورية حقيقية عبر نموذج لغوي (AI) — تعمل دفعة واحدة لسرعة أكبر
-            Future<bool> translateTo(String langCode) async {
-              if (lines.isEmpty) {
-                language = langCode;
-                return false; // لا يوجد نص — يحتاج تفريغاً صوتياً أولاً
-              }
-              language = langCode;
-              final originals = lines.map((l) => l.text).toList();
-              final translated = await AIService.translateBatch(originals, langCode);
-              for (int i = 0; i < lines.length && i < translated.length; i++) {
-                lines[i] = SubtitleLine(lines[i].start, lines[i].end, translated[i]);
-              }
-              return true;
-            }
-          
-            /// ⭐ إلغاء الترجمة الشامل: يحذف الترجمة مهما كان مصدرها
-            void removeAll() {
-              visible = false;
-              lines = [];
-              currentIndex = -1;
-              // للترجمة المدمجة Hardcoded: يفعل وضع Inpainting لإخفاء النص من الإطارات
-            }
-          
-            void restore() {
-              visible = true;
-            }
-          
-            List<SubtitleLine> _parse(String content) {
-              final out = <SubtitleLine>[];
-              for (final b in content.split(RegExp(r'\n\s*\n'))) {
-                final m = RegExp(
-                        r'(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})')
-                    .firstMatch(b);
-                if (m == null) continue;
-                Duration d(h, mi, s, ms) => Duration(
-                    hours: int.parse(h), minutes: int.parse(mi),
-                    seconds: int.parse(s), milliseconds: int.parse(ms));
-                final text = b.split(RegExp(r'\d{2}:\d{2}:\d{2}[,.]\d{3}\s*-->.*')).last.trim();
-                out.add(SubtitleLine(d(m[1]!, m[2]!, m[3]!, m[4]!),
-                    d(m[5]!, m[6]!, m[7]!, m[8]!), text));
-              }
-              out.sort((a, b) => a.start.compareTo(b.start));
-              return out;
-            }
-          }
-          
-          // ═════════════════════ شاشة التشغيل الرئيسية ═════════════════════
-          class PlayerScreen extends StatefulWidget {
-            final String filePath;
-            const PlayerScreen({super.key, required this.filePath});
-            @override
-            State<PlayerScreen> createState() => _PlayerScreenState();
-          }
-          
-          class _PlayerScreenState extends State<PlayerScreen> {
-            late final Player _player;
-            late final VideoController _controller;
-          
-            // الحالة
-            bool showControls = true;
-            bool showAiPanel = false;
-            bool showFilterPanel = false;
-            bool showSubPanel = false;
-            bool isPlaying = false;
-            Duration position = Duration.zero;
-            Duration duration = Duration.zero;
-            double speed = 1.0;
-            double volume = 1.0;
-            bool loop = false;
-          
-            // الفلاتر
-            double brightness = 0, contrast = 1, saturation = 1;
-            String preset = 'عادي';
-          
-            // الذكاء والترجمة والصوت
-            final AIEngine ai = AIEngine.instance;
-            final SubtitleEngine subs = SubtitleEngine();
-            final stt.SpeechToText _speech = stt.SpeechToText();
-            bool listening = false;
-            String lastCommand = '';
-            Timer? _hideTimer;
-          
-            @override
-            void initState() {
-              super.initState();
-              _player = Player();
-              _controller = VideoController(_player);
-              _open();
-              _player.stream.playing.listen((v) => setState(() => isPlaying = v));
-              _player.stream.position.listen((v) {
-                setState(() {
-                  position = v;
-                  subs.update(v);
-                });
-              });
-              _player.stream.duration.listen((v) => setState(() => duration = v));
-              ai.notifyLoaded = () { if (mounted) setState(() {}); };
-              ai.loadModel();
-              _resetHideTimer();
-            }
-          
-            Future<void> _open() async {
-              await _player.open(Media(widget.filePath));
-              _player.play();
-            }
-          
-            void _resetHideTimer() {
-              _hideTimer?.cancel();
-              _hideTimer = Timer(const Duration(seconds: 4), () {
-                if (mounted) setState(() => showControls = false);
-              });
-            }
-          
-            void _tap() {
-              setState(() => showControls = !showControls);
-              _resetHideTimer();
-            }
-          
-            // ═════ تنفيذ الأمر الصوتي ═════
-            void _runCommand(String cmd) {
-              switch (cmd) {
-                case 'enhance':
-                  _enhance(EnhanceLevel.k2);
-                case 'play':
-                  _player.play();
-                case 'pause':
-                  _player.pause();
-                case 'resume':
-                  _player.play();
-                case 'vol_up':
-                  volume = (volume + 0.25).clamp(0, 1);
-                  _player.setVolume(volume * 100);
-                case 'vol_down':
-                  volume = (volume - 0.25).clamp(0, 1);
-                  _player.setVolume(volume * 100);
-                case 'sub_off':
-                  setState(subs.removeAll);
-              }
-              setState(() {});
-            }
-          
-            void _handleVoiceText(String text) {
-              setState(() => lastCommand = text);
-              for (final e in VoiceCommands.commands.entries) {
-                if (text.contains(e.key)) {
-                  _runCommand(e.value);
-                  return;
-                }
-              }
-            }
-          
-            Future<void> _startListening() async {
-              if (listening) {
-                await _speech.stop();
-                setState(() => listening = false);
-                return;
-              }
-              final avail = await _speech.initialize();
-              if (avail) {
-                setState(() => listening = true);
-                _speech.listen(
-                  localeId: 'ar_SA',
-                  onResult: (r) {
-                    if (r.finalResult) {
-                      _handleVoiceText(r.recognizedWords);
-                      setState(() => listening = false);
-                    }
-                  },
-                );
-              }
-            }
-          
-            Future<void> _enhance(EnhanceLevel l) async {
-              setState(() {
-                showAiPanel = false;
-              });
-              await ai.enhance(l);
-              setState(() {});
-            }
-          
-            // ═════ مصفوفة الفلاتر ═════
-            List<double> get _matrix {
-              final b = brightness, c = contrast, s = saturation;
-              return [
-                c * (0.213 + 0.787 * s), c * (0.715 - 0.715 * s), c * (0.072 - 0.072 * s), 0, 255 * b,
-                c * (0.213 - 0.213 * s), c * (0.715 + 0.285 * s), c * (0.072 - 0.072 * s), 0, 255 * b,
-                c * (0.213 - 0.213 * s), c * (0.715 - 0.715 * s), c * (0.072 + 0.928 * s), 0, 255 * b,
-                0, 0, 0, 1, 0,
-              ];
-            }
-          
-            void _setPreset(String p) {
-              preset = p;
-              setState(() {
-                switch (p) {
-                  case 'سينمائي':
-                    brightness = -0.1; contrast = 1.3; saturation = 1.2;
-                  case 'دافئ':
-                    brightness = 0.05; contrast = 1.1; saturation = 1.3;
-                  case 'بارد':
-                    contrast = 1.1; saturation = 0.9;
-                  case 'أبيض وأسود':
-                    contrast = 1.2; saturation = 0;
-                  case 'عادي':
-                    brightness = 0; contrast = 1; saturation = 1;
-                }
-              });
-            }
-          
-            String _fmt(Duration d) =>
-                '${d.inHours > 0 ? '${d.inHours}:' : ''}${(d.inMinutes % 60).toString().padLeft(2, '0')}:${(d.inSeconds % 60).toString().padLeft(2, '0')}';
-          
-            @override
-            void dispose() {
-              _hideTimer?.cancel();
-              _speech.stop();
-              _player.dispose();
-              super.dispose();
-            }
-          
-            @override
-            Widget build(BuildContext context) {
-              return Scaffold(
-                backgroundColor: Colors.black,
-                body: GestureDetector(
-                  onTap: _tap,
-                  child: Stack(children: [
-                    // ═══ الفيديو + الفلاتر ═══
-                    Center(
-                      child: ColorFiltered(
-                        colorFilter: ColorFilter.matrix(_matrix),
-                        child: Video(controller: _controller, controls: NoVideoControls),
-                      ),
-                    ),
-          
-                    // ═══ مؤشر تحسين الذكاء الاصطناعي ═══
-                    if (ai.isProcessing)
-                      Container(
-                        color: Colors.black54,
-                        child: Center(
-                          child: Column(mainAxisSize: MainAxisSize.min, children: [
-                            const CircularProgressIndicator(color: Color(0xFF00D4FF)),
-                            const SizedBox(height: 16),
-                            Text(
-                              '🤖 ${ai.modelLoaded ? "Real-ESRGAN" : "المعالجة الذكية"} تحسّن الجودة...',
-                              style: const TextStyle(color: Colors.white),
-                            ),
-                            const SizedBox(height: 8),
-                            SizedBox(
-                              width: 220,
-                              child: LinearProgressIndicator(
-                                  value: ai.progress, color: const Color(0xFF00D4FF)),
-                            ),
-                          ]),
-                        ),
-                      ),
-          
-                    // ═══ الترجمة ═══
-                    if (subs.visible &&
-                        subs.currentIndex >= 0 &&
-                        subs.currentIndex < subs.lines.length)
-                      Positioned(
-                        bottom: 90,
-                        left: 20,
-                        right: 20,
-                        child: Center(
-                          child: Container(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.75),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              subs.lines[subs.currentIndex].text,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 20,
-                                shadows: [Shadow(blurRadius: 6, color: Colors.black)],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-          
-                    // ═══ شريط علوي ═══
-                    if (showControls)
-                      Positioned(
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: const BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [Colors.black87, Colors.transparent],
-                            ),
-                          ),
-                          child: SafeArea(
-                            child: Row(children: [
-                              IconButton(
-                                icon: const Icon(Icons.arrow_back, color: Colors.white),
-                                onPressed: () => Navigator.pop(context),
-                              ),
-                              const Text('جاري التشغيل',
-                                  style: TextStyle(color: Colors.white, fontSize: 16)),
-                              const Spacer(),
-                              _chip('🤖 AI', () => _togglePanel('ai')),
-                              _chip('🎨 فلاتر', () => _togglePanel('filter')),
-                              _chip('💬 ترجمة', () => _togglePanel('sub')),
-                              GestureDetector(
-                                onTap: _startListening,
-                                child: Container(
-                                  margin: const EdgeInsets.only(left: 4),
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 8),
-                                  decoration: BoxDecoration(
-                                    color: listening ? Colors.red : const Color(0xFF2A2A3A),
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                  child: const Text('🎤',
-                                      style: TextStyle(fontSize: 14)),
-                                ),
-                              ),
-                            ]),
-                          ),
-                        ),
-                      ),
-          
-                    if (listening && showControls)
-                      const Positioned(
-                        top: 110,
-                        left: 0,
-                        right: 0,
-                        child: Center(
-                          child: Text('🎤 استمع لي الآن...',
-                              style: TextStyle(color: Color(0xFF00D4FF), fontSize: 16)),
-                        ),
-                      ),
-          
-                    // ═══ لوحات جانبية ═══
-                    if (showAiPanel && showControls)
-                      Positioned(
-                        right: 12,
-                        top: 110,
-                        child: _panel([
-                          const Text('🤖 تحسين الجودة بالذكاء الاصطناعي',
-                              style: TextStyle(fontWeight: FontWeight.bold)),
-                          Text(
-                            ai.modelLoaded
-                                ? '✅ نموذج Real-ESRGAN جاهز (محلي)'
-                                : '⬇️ جاري تنزيل النموذج تلقائياً...',
-                            style: const TextStyle(fontSize: 11, color: Colors.white54),
-                          ),
-                          Text(
-                            AiConfig.ready
-                                ? '🔑 مفتاح API مفعّل — الترجمة الذكية تعمل'
-                                : '🔑 أضف مفتاح API من ⚙️ الإعدادات',
-                            style: const TextStyle(fontSize: 11, color: Colors.white54),
-                          ),
-                          const Divider(color: Colors.white24),
-                          for (final e in {
-                            EnhanceLevel.off: 'إيقاف',
-                            EnhanceLevel.hd: 'خفيف HD',
-                            EnhanceLevel.fullhd: 'متوسط Full HD',
-                            EnhanceLevel.k2: 'عالي 2K',
-                            EnhanceLevel.k4: 'فائق 4K',
-                          }.entries)
-                            ListTile(
-                              dense: true,
-                              title: Text(e.value,
-                                  style: TextStyle(
-                                    color: ai.level == e.key
-                                        ? const Color(0xFF00D4FF)
-                                        : Colors.white,
-                                  )),
-                              trailing: ai.level == e.key
-                                  ? const Icon(Icons.check,
-                                      color: Color(0xFF00D4FF), size: 18)
-                                  : null,
-                              onTap: () => _enhance(e.key),
-                            ),
-                        ]),
-                      ),
-          
-                    if (showFilterPanel && showControls)
-                      Positioned(
-                        right: 12,
-                        top: 110,
-                        width: 270,
-                        child: _panel([
-                          const Text('🎨 فلاتر الفيديو',
-                              style: TextStyle(fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 8),
-                          Wrap(spacing: 8, runSpacing: 8, children: [
-                            for (final p in ['عادي', 'سينمائي', 'دافئ', 'بارد', 'أبيض وأسود'])
-                              ActionChip(
-                                label: Text(p,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: preset == p ? Colors.black : Colors.white,
-                                    )),
-                                backgroundColor: preset == p
-                                    ? const Color(0xFF00D4FF)
-                                    : const Color(0xFF2A2A3A),
-                                onPressed: () => _setPreset(p),
-                              ),
-                          ]),
-                          _slider('السطوع', brightness, -1, 1, (v) => setState(() => brightness = v)),
-                          _slider('التباين', contrast, 0.5, 2, (v) => setState(() => contrast = v)),
-                          _slider('التشبع', saturation, 0, 2, (v) => setState(() => saturation = v)),
-                        ]),
-                      ),
-          
-                    if (showSubPanel && showControls)
-                      Positioned(
-                        right: 12,
-                        top: 110,
-                        width: 290,
-                        child: _panel([
-                          const Text('💬 الترجمة',
-                              style: TextStyle(fontWeight: FontWeight.bold)),
-                          SwitchListTile(
-                            dense: true,
-                            title: const Text('إظهار الترجمة'),
-                            value: subs.visible,
-                            onChanged: (v) =>
-                                setState(() => v ? subs.restore() : subs.removeAll()),
-                          ),
-                          const Divider(color: Colors.white24),
-                          const Text('ترجمة فورية بكل اللغات:',
-                              style: TextStyle(fontSize: 12, color: Colors.white54)),
-                          const SizedBox(height: 8),
-                          SizedBox(
-                            height: 140,
-                            child: GridView.count(
-                              crossAxisCount: 3,
-                              childAspectRatio: 2.2,
-                              children: [
-                                for (final e in SubtitleEngine.languages.entries)
-                                  GestureDetector(
-                                    onTap: () async {
-                                      final ok = await subs.translateTo(e.key);
-                                      setState(() {});
-                                      if (mounted) {
-                                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                                          content: Text(ok
-                                              ? '🤖 تمت الترجمة الذكية إلى ${e.value}'
-                                              : '⚠️ أضف مفتاح API من الإعدادات أولاً'),
-                                          duration: const Duration(seconds: 2),
-                                        ));
-                                      }
-                                    },
-                                    child: Container(
-                                      margin: const EdgeInsets.all(3),
-                                      decoration: BoxDecoration(
-                                        color: subs.language == e.key
-                                            ? const Color(0xFF00D4FF)
-                                            : const Color(0xFF2A2A3A),
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Center(
-                                        child: Text(e.value,
-                                            style: TextStyle(
-                                              fontSize: 11,
-                                              color: subs.language == e.key
-                                                  ? Colors.black
-                                                  : Colors.white,
-                                            )),
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.redAccent,
-                              minimumSize: const Size(double.infinity, 38),
-                            ),
-                            icon: const Icon(Icons.subtitles_off, size: 18),
-                            label: const Text('❌ إلغاء الترجمة نهائياً',
-                                style: TextStyle(fontSize: 13)),
-                            onPressed: () => setState(subs.removeAll),
-                          ),
-                        ]),
-                      ),
-          
-                    // ═══ شريط التحكم السفلي ═══
-                    if (showControls)
-                      Positioned(
-                        bottom: 0,
-                        left: 0,
-                        right: 0,
-                        child: Container(
-                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                          decoration: const BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.bottomCenter,
-                              end: Alignment.topCenter,
-                              colors: [Colors.black87, Colors.transparent],
-                            ),
-                          ),
-                          child: Column(mainAxisSize: MainAxisSize.min, children: [
-                            SliderTheme(
-                              data: SliderTheme.of(context).copyWith(
-                                  trackHeight: 3,
-                                  thumbShape:
-                                      const RoundSliderThumbShape(enabledThumbRadius: 6)),
-                              child: Slider(
-                                value: duration.inSeconds > 0
-                                    ? position.inSeconds.toDouble()
-                                    : 0,
-                                max: duration.inSeconds.toDouble(),
-                                activeColor: const Color(0xFF00D4FF),
-                                onChanged: (v) =>
-                                    _player.seek(Duration(seconds: v.toInt())),
-                              ),
-                            ),
-                            Row(children: [
-                              IconButton(
-                                icon: Icon(
-                                    isPlaying ? Icons.pause : Icons.play_arrow,
-                                    color: Colors.white,
-                                    size: 32),
-                                onPressed: () => isPlaying ? _player.pause() : _player.play(),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.skip_previous, color: Colors.white),
-                                onPressed: () => _player.seek(Duration.zero),
-                              ),
-                              Text('${_fmt(position)} / ${_fmt(duration)}',
-                                  style: const TextStyle(
-                                      color: Colors.white70, fontSize: 12)),
-                              const Spacer(),
-                              PopupMenuButton<double>(
-                                icon: const Icon(Icons.speed, color: Colors.white),
-                                onSelected: (s) {
-                                  speed = s;
-                                  _player.setRate(s);
-                                  setState(() {});
-                                },
-                                itemBuilder: (_) => [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
-                                    .map((s) =>
-                                        PopupMenuItem(value: s, child: Text('${s}x')))
-                                    .toList(),
-                              ),
-                              PopupMenuButton<double>(
-                                icon: const Icon(Icons.volume_up, color: Colors.white),
-                                onSelected: (v) {
-                                  volume = v;
-                                  _player.setVolume(v * 100);
-                                  setState(() {});
-                                },
-                                itemBuilder: (_) => [0.0, 0.25, 0.5, 0.75, 1.0]
-                                    .map((v) => PopupMenuItem(
-                                        value: v,
-                                        child: Text('🔊 ${(v * 100).toInt()}%')))
-                                    .toList(),
-                              ),
-                              IconButton(
-                                icon: Icon(
-                                    loop ? Icons.repeat_one : Icons.repeat,
-                                    color: loop
-                                        ? const Color(0xFF00D4FF)
-                                        : Colors.white),
-                                onPressed: () {
-                                  loop = !loop;
-                                  _player.setPlaylistMode(
-                                      loop ? PlaylistMode.single : PlaylistMode.none);
-                                  setState(() {});
-                                },
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.fullscreen, color: Colors.white),
-                                onPressed: () {
-                                  SystemChrome.setEnabledSystemUIMode(
-                                      SystemUiMode.immersiveSticky);
-                                  SystemChrome.setPreferredOrientations(
-                                      [DeviceOrientation.landscapeLeft,
-                                       DeviceOrientation.landscapeRight]);
-                                },
-                              ),
-                            ]),
-                          ]),
-                        ),
-                      ),
-                  ]),
-                ),
-              );
-            }
-          
-            void _togglePanel(String which) {
-              setState(() {
-                showAiPanel = which == 'ai' ? !showAiPanel : false;
-                showFilterPanel = which == 'filter' ? !showFilterPanel : false;
-                showSubPanel = which == 'sub' ? !showSubPanel : false;
-              });
-              _resetHideTimer();
-            }
-          
-            Widget _chip(String label, VoidCallback onTap) => Padding(
-                  padding: const EdgeInsets.only(left: 4),
-                  child: ActionChip(
-                    label:
-                        Text(label, style: const TextStyle(fontSize: 12, color: Colors.white)),
-                    backgroundColor: const Color(0xFF2A2A3A),
-                    onPressed: onTap,
-                  ),
-                );
-          
-            Widget _panel(List<Widget> children) => Container(
-                  padding: const EdgeInsets.all(12),
-                  width: 270,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF15151F).withOpacity(0.95),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFF00D4FF).withOpacity(0.3)),
-                  ),
-                  child:
-                      Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: children),
-                );
-          
-            Widget _slider(String label, double val, double min, double max,
-                    ValueChanged<double> onChanged) =>
-                Row(children: [
-                  Text(label, style: const TextStyle(fontSize: 12, color: Colors.white54)),
-                  Expanded(
-                      child: Slider(
-                          value: val,
-                          min: min,
-                          max: max,
-                          activeColor: const Color(0xFF00D4FF),
-                          onChanged: onChanged)),
-                ]);
-          }
-          DART_EOF
+          EOF
 
-      - name: Build Release APK
+          # 7. FloatingService.kt
+          cat << 'EOF' > app/src/main/java/com/example/aimfox/FloatingService.kt
+          package com.example.aimfox
+
+          import android.app.*
+          import android.content.Intent
+          import android.graphics.PixelFormat
+          import android.os.Build
+          import android.os.IBinder
+          import android.view.Gravity
+          import android.view.WindowManager
+          import android.webkit.WebView
+          import androidx.core.app.NotificationCompat
+
+          class FloatingService : Service() {
+
+              private lateinit var windowManager: WindowManager
+              private lateinit var floatingView: WebView
+              private lateinit var params: WindowManager.LayoutParams
+
+              override fun onCreate() {
+                  super.onCreate()
+                  windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+
+                  params = WindowManager.LayoutParams(
+                      WindowManager.LayoutParams.MATCH_PARENT,
+                      WindowManager.LayoutParams.MATCH_PARENT,
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                          WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                      else
+                          WindowManager.LayoutParams.TYPE_PHONE,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                      PixelFormat.TRANSLUCENT
+                  )
+                  params.gravity = Gravity.TOP or Gravity.START
+
+                  floatingView = WebView(this)
+                  floatingView.settings.javaScriptEnabled = true
+                  floatingView.settings.domStorageEnabled = true
+                  floatingView.setBackgroundColor(0x00000000)
+
+                  floatingView.loadDataWithBaseURL(null, getAimTrainerHTML(), "text/html", "UTF-8", null)
+                  windowManager.addView(floatingView, params)
+                  startForeground(1, createNotification())
+              }
+
+              private fun createNotification(): Notification {
+                  val channelId = "aimfox_overlay_channel"
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      val channel = NotificationChannel(channelId, "Aim Fox Overlay", NotificationManager.IMPORTANCE_MIN)
+                      val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                      manager.createNotificationChannel(channel)
+                  }
+                  return NotificationCompat.Builder(this, channelId)
+                      .setContentTitle("Aim Fox يعمل")
+                      .setContentText("مدرب التصويب العائم نشط")
+                      .setSmallIcon(android.R.drawable.ic_menu_compass)
+                      .build()
+              }
+
+              override fun onDestroy() {
+                  super.onDestroy()
+                  if (::floatingView.isInitialized) {
+                      windowManager.removeView(floatingView)
+                  }
+              }
+
+              override fun onBind(intent: Intent?): IBinder? = null
+
+              private fun getAimTrainerHTML(): String {
+                  return """
+                      <!DOCTYPE html>
+                      <html lang="ar" dir="rtl">
+                      <head>
+                      <meta charset="UTF-8">
+                      <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+                      <style>
+                          body { margin:0; padding:0; background: transparent; overflow: hidden; font-family: sans-serif; }
+                          #arena { position: absolute; inset: 0; cursor: crosshair; background: transparent; }
+                          .target { position: absolute; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #333 0 15%, #111 15% 30%, #000 30% 100%); border: 2px solid #ddd; box-shadow: 0 0 15px rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; font-family: serif; color: #fff; }
+                          .target::after { content: '8'; font-size: 24px; background: #fff; color: #000; border-radius: 50%; width: 40%; height: 40%; display: flex; align-items: center; justify-content: center; }
+                          .target.hit { animation: pop 0.25s forwards; }
+                          @keyframes pop { to { transform: scale(1.8); opacity: 0; } }
+                          #startOverlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,40,20,0.9); color: white; z-index: 10; }
+                          #startOverlay button { padding: 15px 40px; font-size: 20px; background: #ff5533; color: white; border: none; border-radius: 8px; cursor: pointer; margin-top: 20px; }
+                          .hidden { display: none !important; }
+                      </style>
+                      </head>
+                      <body>
+                      <div id="startOverlay">
+                          <h2>🎱 مدرب تصويب البلياردو</h2>
+                          <p>اضغط على كرات 8 بأسرع ما يمكن</p>
+                          <button onclick="startGame()">▶ ابدأ التدريب</button>
+                      </div>
+                      <div id="arena" class="hidden"></div>
+                      <script>
+                          let running = false, score = 0, timeLeft = 30, timer = null, currentTarget = null;
+                          const arena = document.getElementById('arena');
+                          function startGame() {
+                              document.getElementById('startOverlay').classList.add('hidden');
+                              arena.classList.remove('hidden');
+                              running = true; score = 0; timeLeft = 30;
+                              timer = setInterval(() => { timeLeft--; if (timeLeft <= 0) endGame(); }, 1000);
+                              spawnTarget();
+                          }
+                          function spawnTarget() {
+                              if (!running) return;
+                              if (currentTarget) currentTarget.remove();
+                              const t = document.createElement('div');
+                              t.className = 'target';
+                              const size = 60;
+                              t.style.width = t.style.height = size + 'px';
+                              const r = arena.getBoundingClientRect();
+                              t.style.left = (Math.random() * (r.width - size - 20) + 10) + 'px';
+                              t.style.top = (Math.random() * (r.height - size - 20) + 10) + 'px';
+                              t.addEventListener('pointerdown', (e) => { e.stopPropagation(); hitTarget(t); });
+                              arena.appendChild(t); currentTarget = t;
+                          }
+                          function hitTarget(t) {
+                              if (!running) return;
+                              score++; t.classList.add('hit');
+                              setTimeout(() => { if (t.parentNode) t.remove(); spawnTarget(); }, 150);
+                          }
+                          function endGame() {
+                              running = false; clearInterval(timer);
+                              if (currentTarget) currentTarget.remove();
+                              arena.classList.add('hidden');
+                              document.getElementById('startOverlay').classList.remove('hidden');
+                              alert('انتهى الوقت! نتيجتك: ' + score);
+                          }
+                      </script>
+                      </body>
+                      </html>
+                  """.trimIndent()
+              }
+          }
+          EOF
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.7
+
+      - name: Build with Gradle
         run: |
-          cd app_build
-          flutter build apk --release
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          gradle assembleDebug
 
-      - name: Upload Ready APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Video-Player-APK
-          path: app_build/build/app/outputs/flutter-apk/app-release.apk
+          name: AimFox-Overlay-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
