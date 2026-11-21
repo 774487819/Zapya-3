@@ -1418,6 +1418,9 @@ jobs:
         run: |
           # foreground service + notifications need API 24+
           sed -i 's/flutter\.minSdkVersion/24/' android/app/build.gradle*
+          # some dependencies require compileSdk 37+
+          sed -i 's/flutter\.compileSdkVersion/37/' android/app/build.gradle*
+          echo 'android.suppressUnsupportedCompileSdk=37' >> android/gradle.properties
           flutter pub get
           flutter build apk --release
 
