@@ -1,599 +1,1428 @@
-name: Build Aim Fox APK
+name: Build HotGate APK
+
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
-  build:
+  build_apk:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
           distribution: 'temurin'
+          java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
         with:
-          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
+          channel: 'stable'
 
-      - name: Generate Project Files
+      - name: Create Flutter Project & Install Packages
         run: |
-          mkdir -p app/src/main/java/com/example/aimfox
-          mkdir -p app/src/main/res/layout
+          flutter create -a kotlin --org com.hotgate --project-name hotgate --platforms=android app_build
+          cd app_build
+          flutter pub add flutter_foreground_task:^9.1.0
+          flutter pub add permission_handler
 
-          # 1. settings.gradle
-          cat << 'EOF' > settings.gradle
-          pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
-          }
-          dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
-          rootProject.name = "AimFoxOverlay"
-          include(":app")
-          EOF
+      - name: Configure Android Manifest
+        run: |
+          cat << 'EOF' > app_build/android/app/src/main/AndroidManifest.xml
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:tools="http://schemas.android.com/tools">
 
-          # 2. build.gradle
-          cat << 'EOF' > build.gradle
-          plugins {
-              id 'com.android.application' version '8.5.0' apply false
-              id 'org.jetbrains.kotlin.android' version '2.0.0' apply false
-          }
-          EOF
-
-          # 3. app/build.gradle
-          cat << 'EOF' > app/build.gradle
-          plugins {
-              id 'com.android.application'
-              id 'org.jetbrains.kotlin.android'
-          }
-
-          android {
-              namespace 'com.example.aimfox'
-              compileSdk 34
-
-              defaultConfig {
-                  applicationId "com.example.aimfox"
-                  minSdk 26
-                  targetSdk 34
-                  versionCode 2
-                  versionName "2.0"
-              }
-              buildTypes {
-                  release {
-                      minifyEnabled false
-                  }
-              }
-              compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_17
-                  targetCompatibility JavaVersion.VERSION_17
-              }
-              kotlinOptions {
-                  jvmTarget = '17'
-              }
-          }
-
-          dependencies {
-              implementation 'androidx.core:core-ktx:1.13.1'
-              implementation 'androidx.appcompat:appcompat:1.7.0'
-          }
-          EOF
-
-          # 4. gradle.properties
-          cat << 'EOF' > gradle.properties
-          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
-          android.useAndroidX=true
-          android.nonTransitiveRClass=true
-          EOF
-
-          # 5. app/src/main/AndroidManifest.xml
-          cat << 'EOF' > app/src/main/AndroidManifest.xml
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+              <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-              <uses-permission android:name="android.permission.VIBRATE" />
+
               <application
-                  android:allowBackup="true"
-                  android:supportsRtl="true"
-                  android:icon="@android:drawable/ic_menu_myplaces"
-                  android:label="Aim Fox Overlay"
-                  android:theme="@style/Theme.AppCompat.NoActionBar">
+                  android:label="HotGate"
+                  android:name="${applicationName}"
+                  android:icon="@mipmap/ic_launcher">
+
                   <activity
                       android:name=".MainActivity"
-                      android:exported="true">
+                      android:exported="true"
+                      android:launchMode="singleTop"
+                      android:taskAffinity=""
+                      android:theme="@style/LaunchTheme"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+                      android:hardwareAccelerated="true"
+                      android:windowSoftInputMode="adjustResize">
+                      <meta-data
+                          android:name="io.flutter.embedding.android.NormalTheme"
+                          android:resource="@style/NormalTheme" />
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
                   </activity>
+
+                  <!-- Keeps the root engine + DNS filter alive in background -->
                   <service
-                      android:name=".FloatingService"
-                      android:exported="false"
-                      android:foregroundServiceType="specialUse">
-                      <property
-                          android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                          android:value="Overlay for aim training" />
-                  </service>
+                      android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+                      android:foregroundServiceType="dataSync"
+                      android:exported="false" />
+
+                  <meta-data android:name="flutterEmbedding" android:value="2" />
               </application>
+
+              <queries>
+                  <intent>
+                      <action android:name="android.intent.action.PROCESS_TEXT" />
+                      <data android:mimeType="text/plain" />
+                  </intent>
+              </queries>
           </manifest>
           EOF
 
-          # 6. app/src/main/res/layout/activity_main.xml
-          cat << 'EOF' > app/src/main/res/layout/activity_main.xml
-          <?xml version="1.0" encoding="utf-8"?>
-          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-              android:layout_width="match_parent"
-              android:layout_height="match_parent"
-              android:orientation="vertical"
-              android:gravity="center"
-              android:background="#0d1117"
-              android:padding="24dp">
-              <TextView
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:text="🦊 Aim Fox"
-                  android:textColor="#ffb020"
-                  android:textSize="28sp"
-                  android:textStyle="bold" />
-              <TextView
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:text="مدرب التصويب العائم"
-                  android:textColor="#e6edf3"
-                  android:textSize="16sp"
-                  android:layout_marginTop="8dp" />
-              <Button
-                  android:id="@+id/btnStart"
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:layout_marginTop="32dp"
-                  android:text="▶ بدء التدريب العائم"
-                  android:backgroundTint="#ff5533"
-                  android:textColor="#ffffff"
-                  android:paddingHorizontal="32dp"
-                  android:paddingVertical="14dp" />
-              <Button
-                  android:id="@+id/btnStop"
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:layout_marginTop="12dp"
-                  android:text="⏹ إيقاف المدرب"
-                  android:backgroundTint="#30363d"
-                  android:textColor="#ffffff"
-                  android:paddingHorizontal="32dp"
-                  android:paddingVertical="14dp" />
-              <TextView
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:text="سيظهر المدرب فوق التطبيقات الأخرى، ويمكنك تصغيره أو إغلاقه من داخله"
-                  android:textColor="#8b949e"
-                  android:textSize="12sp"
-                  android:gravity="center"
-                  android:layout_marginTop="16dp" />
-          </LinearLayout>
-          EOF
-
-          # 7. app/src/main/java/com/example/aimfox/MainActivity.kt
-          cat << 'EOF' > app/src/main/java/com/example/aimfox/MainActivity.kt
-          package com.example.aimfox
-
-          import android.Manifest
-          import android.content.Intent
-          import android.content.pm.PackageManager
-          import android.net.Uri
-          import android.os.Build
-          import android.os.Bundle
-          import android.provider.Settings
-          import android.widget.Button
-          import android.widget.Toast
-          import androidx.appcompat.app.AppCompatActivity
-          import androidx.core.app.ActivityCompat
-          import androidx.core.content.ContextCompat
-
-          class MainActivity : AppCompatActivity() {
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  setContentView(R.layout.activity_main)
-
-                  if (Build.VERSION.SDK_INT >= 33 &&
-                      ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                      != PackageManager.PERMISSION_GRANTED
-                  ) {
-                      ActivityCompat.requestPermissions(
-                          this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1
-                      )
-                  }
-
-                  findViewById<Button>(R.id.btnStart).setOnClickListener {
-                      if (!Settings.canDrawOverlays(this)) {
-                          Toast.makeText(this, "فعّل إذن العرض فوق التطبيقات ثم ارجع واضغط بدء", Toast.LENGTH_LONG).show()
-                          startActivity(
-                              Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + packageName))
-                          )
-                      } else {
-                          ContextCompat.startForegroundService(this, Intent(this, FloatingService::class.java))
-                      }
-                  }
-
-                  findViewById<Button>(R.id.btnStop).setOnClickListener {
-                      stopService(Intent(this, FloatingService::class.java))
-                  }
-              }
-          }
-          EOF
-
-          # 8. app/src/main/java/com/example/aimfox/FloatingService.kt
-          cat << 'EOF' > app/src/main/java/com/example/aimfox/FloatingService.kt
-          package com.example.aimfox
-
-          import android.app.Notification
-          import android.app.NotificationChannel
-          import android.app.NotificationManager
-          import android.app.PendingIntent
-          import android.app.Service
-          import android.content.Context
-          import android.content.Intent
-          import android.content.pm.ServiceInfo
-          import android.graphics.PixelFormat
-          import android.os.Build
-          import android.os.Handler
-          import android.os.IBinder
-          import android.os.Looper
-          import android.os.VibrationEffect
-          import android.os.Vibrator
-          import android.view.Gravity
-          import android.view.WindowManager
-          import android.webkit.JavascriptInterface
-          import android.webkit.WebView
-          import androidx.core.app.NotificationCompat
-
-          class FloatingService : Service() {
-
-              private var windowManager: WindowManager? = null
-              private var webView: WebView? = null
-              private lateinit var params: WindowManager.LayoutParams
-              private val main = Handler(Looper.getMainLooper())
-
-              private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-
-              inner class Bridge {
-                  @JavascriptInterface
-                  fun close() {
-                      main.post { stopSelf() }
-                  }
-
-                  @JavascriptInterface
-                  fun setMini(mini: Boolean) {
-                      main.post { applyMini(mini) }
-                  }
-
-                  @JavascriptInterface
-                  fun vibrate(ms: Int) {
-                      @Suppress("DEPRECATION")
-                      val v = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
-                      v.vibrate(VibrationEffect.createOneShot(ms.toLong(), VibrationEffect.DEFAULT_AMPLITUDE))
-                  }
-
-                  @JavascriptInterface
-                  fun getBest(key: String): Int =
-                      getSharedPreferences("aimfox", MODE_PRIVATE).getInt("best_" + key, 0)
-
-                  @JavascriptInterface
-                  fun saveBest(key: String, value: Int) {
-                      getSharedPreferences("aimfox", MODE_PRIVATE).edit().putInt("best_" + key, value).apply()
-                  }
-              }
-
-              private fun applyMini(mini: Boolean) {
-                  val view = webView ?: return
-                  if (mini) {
-                      params.width = dp(64)
-                      params.height = dp(64)
-                      params.gravity = Gravity.TOP or Gravity.END
-                      params.x = dp(8)
-                      params.y = dp(120)
-                  } else {
-                      params.width = WindowManager.LayoutParams.MATCH_PARENT
-                      params.height = WindowManager.LayoutParams.MATCH_PARENT
-                      params.gravity = Gravity.TOP or Gravity.START
-                      params.x = 0
-                      params.y = 0
-                  }
-                  windowManager?.updateViewLayout(view, params)
-              }
-
-              override fun onCreate() {
-                  super.onCreate()
-                  startAsForeground()
-
-                  windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-                  params = WindowManager.LayoutParams(
-                      WindowManager.LayoutParams.MATCH_PARENT,
-                      WindowManager.LayoutParams.MATCH_PARENT,
-                      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                          WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                      PixelFormat.TRANSLUCENT
-                  )
-                  params.gravity = Gravity.TOP or Gravity.START
-
-                  val view = WebView(applicationContext)
-                  view.settings.javaScriptEnabled = true
-                  view.settings.domStorageEnabled = true
-                  view.setBackgroundColor(0x00000000)
-                  view.addJavascriptInterface(Bridge(), "Android")
-                  view.loadDataWithBaseURL("https://aimfox.local/", getAimTrainerHTML(), "text/html", "UTF-8", null)
-                  try {
-                      windowManager?.addView(view, params)
-                      webView = view
-                  } catch (e: Exception) {
-                      stopSelf()
-                  }
-              }
-
-              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-                  if (intent?.action == ACTION_STOP) {
-                      stopSelf()
-                  }
-                  return START_NOT_STICKY
-              }
-
-              private fun startAsForeground() {
-                  val notification = createNotification()
-                  if (Build.VERSION.SDK_INT >= 34) {
-                      startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-                  } else {
-                      startForeground(1, notification)
-                  }
-              }
-
-              private fun createNotification(): Notification {
-                  val channelId = "aimfox_overlay_channel"
-                  val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-                  manager.createNotificationChannel(
-                      NotificationChannel(channelId, "Aim Fox Overlay", NotificationManager.IMPORTANCE_LOW)
-                  )
-                  val stopIntent = PendingIntent.getService(
-                      this, 0,
-                      Intent(this, FloatingService::class.java).setAction(ACTION_STOP),
-                      PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-                  )
-                  return NotificationCompat.Builder(this, channelId)
-                      .setContentTitle("Aim Fox يعمل")
-                      .setContentText("مدرب التصويب العائم نشط")
-                      .setSmallIcon(android.R.drawable.ic_menu_compass)
-                      .setOngoing(true)
-                      .addAction(android.R.drawable.ic_delete, "إيقاف", stopIntent)
-                      .build()
-              }
-
-              override fun onDestroy() {
-                  super.onDestroy()
-                  webView?.let {
-                      try { windowManager?.removeView(it) } catch (e: Exception) { }
-                      it.destroy()
-                  }
-                  webView = null
-              }
-
-              override fun onBind(intent: Intent?): IBinder? = null
-
-              companion object {
-                  const val ACTION_STOP = "com.example.aimfox.STOP"
-              }
-
-              private fun getAimTrainerHTML(): String {
-                  return """
-          <!DOCTYPE html>
-          <html lang="ar" dir="rtl">
-          <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-          <style>
-          *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
-          html,body{margin:0;height:100%;background:transparent;overflow:hidden;font-family:sans-serif;color:#fff}
-          .screen{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,30,20,.93);text-align:center;padding:16px;z-index:10}
-          .screen h2{margin:0 0 8px;font-size:24px}
-          .screen p{margin:4px 0;color:#c9d1d9}
-          .btn{padding:12px 28px;font-size:18px;background:#ff5533;color:#fff;border:none;border-radius:10px;margin-top:14px}
-          .btn.alt{background:#30363d}
-          .row{display:flex;gap:8px;margin-top:12px}
-          .chip{padding:8px 16px;border-radius:20px;background:#21262d;color:#e6edf3;border:2px solid transparent;font-size:15px}
-          .chip.on{border-color:#ffb020;color:#ffb020}
-          .top{position:absolute;top:10px;left:10px;display:flex;gap:8px}
-          .icon{width:40px;height:40px;border-radius:50%;border:none;background:#30363d;color:#fff;font-size:18px}
-          #hud{position:absolute;top:0;left:0;right:0;height:48px;display:none;align-items:center;justify-content:space-between;padding:0 10px;background:rgba(0,0,0,.55);font-size:14px;z-index:5}
-          #hud .icon{width:34px;height:34px;font-size:15px}
-          #arena{position:absolute;inset:0;display:none}
-          .target{position:absolute;border-radius:50%;background:radial-gradient(circle at 35% 35%,#333 0 15%,#111 15% 30%,#000 30% 100%);border:2px solid #ddd;box-shadow:0 0 15px rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;touch-action:none}
-          .target::after{content:'8';font-size:12px;font-weight:bold;background:#fff;color:#000;border-radius:50%;width:40%;height:40%;display:flex;align-items:center;justify-content:center}
-          .target.hit{animation:pop .25s forwards}
-          @keyframes pop{to{transform:scale(1.8);opacity:0}}
-          #bubble{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:#ffb020;border-radius:50%;font-size:30px;z-index:20}
-          body.mini .screen,body.mini #hud,body.mini #arena{display:none !important}
-          body.mini #bubble{display:flex}
-          </style>
-          </head>
-          <body>
-          <div id="menu" class="screen">
-            <div class="top">
-              <button class="icon" onclick="mini(true)">➖</button>
-              <button class="icon" onclick="closeApp()">✕</button>
-            </div>
-            <h2>🎱 مدرب تصويب البلياردو</h2>
-            <p>اضغط على كرات 8 بأسرع ما يمكن</p>
-            <p id="best"></p>
-            <div class="row">
-              <button class="chip" id="d_easy" onclick="setDiff('easy')">سهل</button>
-              <button class="chip on" id="d_mid" onclick="setDiff('mid')">متوسط</button>
-              <button class="chip" id="d_hard" onclick="setDiff('hard')">صعب</button>
-            </div>
-            <button class="btn" onclick="startGame()">▶ ابدأ التدريب</button>
-          </div>
-          <div id="result" class="screen">
-            <div class="top">
-              <button class="icon" onclick="mini(true)">➖</button>
-              <button class="icon" onclick="closeApp()">✕</button>
-            </div>
-            <h2 id="rTitle">انتهى الوقت!</h2>
-            <p id="rScore" style="font-size:28px;color:#ffb020"></p>
-            <p id="rAcc"></p>
-            <p id="rRt"></p>
-            <p id="rCombo"></p>
-            <button class="btn" onclick="startGame()">🔁 العب مجدداً</button>
-            <button class="btn alt" onclick="toMenu()">القائمة</button>
-          </div>
-          <div id="hud">
-            <span id="sc"></span><span id="tm"></span><span id="cb"></span><span id="ac"></span>
-            <button class="icon" onclick="abortGame()">⏹</button>
-          </div>
-          <div id="arena"></div>
-          <div id="bubble" onclick="mini(false)">🦊</div>
-          <script>
-          var DIFF = { easy:{size:80,life:2200}, mid:{size:60,life:1500}, hard:{size:42,life:1000} };
-          var cur = 'mid', running = false, score = 0, hits = 0, misses = 0, combo = 0, bestCombo = 0;
-          var timeLeft = 30, tick = null, target = null, lifeTimer = null, spawnAt = 0, rts = [];
-          var arena = document.getElementById('arena');
-          function byId(id){ return document.getElementById(id); }
-          function vib(ms){ if (window.Android) { try { Android.vibrate(ms); } catch(e){} } }
-          function show(id){
-            byId('menu').style.display = 'none';
-            byId('result').style.display = 'none';
-            if (id) byId(id).style.display = 'flex';
-          }
-          function mini(on){
-            document.body.classList.toggle('mini', on);
-            if (running) abortGame();
-            if (window.Android) Android.setMini(on);
-          }
-          function closeApp(){ if (window.Android) Android.close(); }
-          function setDiff(d){
-            cur = d;
-            ['easy','mid','hard'].forEach(function(k){ byId('d_'+k).classList.toggle('on', k === d); });
-            refreshBest();
-          }
-          function refreshBest(){
-            var b = window.Android ? Android.getBest(cur) : 0;
-            byId('best').textContent = 'أفضل نتيجة: ' + b;
-          }
-          function upd(){
-            var total = hits + misses;
-            var acc = total ? Math.round(hits * 100 / total) : 100;
-            byId('sc').textContent = 'النقاط: ' + score;
-            byId('tm').textContent = '⏱ ' + timeLeft;
-            byId('cb').textContent = 'كومبو: ' + combo;
-            byId('ac').textContent = 'الدقة: ' + acc + '%';
-          }
-          function clearTarget(){
-            clearTimeout(lifeTimer);
-            if (target && target.parentNode) target.parentNode.removeChild(target);
-            target = null;
-          }
-          function startGame(){
-            running = true; score = 0; hits = 0; misses = 0; combo = 0; bestCombo = 0; timeLeft = 30; rts = [];
-            show(null);
-            byId('hud').style.display = 'flex';
-            arena.style.display = 'block';
-            upd();
-            clearInterval(tick);
-            tick = setInterval(function(){ timeLeft--; upd(); if (timeLeft <= 0) endGame(); }, 1000);
-            spawn();
-          }
-          function spawn(){
-            if (!running) return;
-            clearTarget();
-            var d = DIFF[cur];
-            var t = document.createElement('div');
-            t.className = 'target';
-            t.style.width = t.style.height = d.size + 'px';
-            var w = arena.clientWidth, h = arena.clientHeight;
-            t.style.left = (Math.random() * Math.max(10, w - d.size - 20) + 10) + 'px';
-            t.style.top = (60 + Math.random() * Math.max(10, h - d.size - 110)) + 'px';
-            t.addEventListener('pointerdown', function(e){ e.stopPropagation(); hit(t); });
-            arena.appendChild(t);
-            target = t;
-            spawnAt = Date.now();
-            lifeTimer = setTimeout(function(){ if (target === t) { miss(); spawn(); } }, d.life);
-          }
-          function hit(t){
-            if (!running || t !== target) return;
-            clearTimeout(lifeTimer);
-            rts.push(Date.now() - spawnAt);
-            hits++; combo++;
-            if (combo > bestCombo) bestCombo = combo;
-            score += 1 + Math.floor(combo / 5);
-            vib(15);
-            t.classList.add('hit');
-            target = null;
-            upd();
-            setTimeout(function(){ if (t.parentNode) t.parentNode.removeChild(t); spawn(); }, 120);
-          }
-          function miss(){ misses++; combo = 0; upd(); }
-          arena.addEventListener('pointerdown', function(){ if (running) { miss(); vib(40); } });
-          function stopAll(){
-            running = false;
-            clearInterval(tick);
-            clearTarget();
-            byId('hud').style.display = 'none';
-            arena.style.display = 'none';
-          }
-          function abortGame(){ stopAll(); toMenu(); }
-          function toMenu(){ refreshBest(); show('menu'); }
-          function endGame(){
-            stopAll();
-            var total = hits + misses;
-            var acc = total ? Math.round(hits * 100 / total) : 0;
-            var avg = rts.length ? Math.round(rts.reduce(function(a, b){ return a + b; }, 0) / rts.length) : 0;
-            var record = false;
-            if (window.Android) {
-              var b = Android.getBest(cur);
-              if (score > b) { Android.saveBest(cur, score); record = true; }
-            }
-            byId('rTitle').textContent = record ? '🏆 رقم قياسي جديد!' : 'انتهى الوقت!';
-            byId('rScore').textContent = 'النقاط: ' + score;
-            byId('rAcc').textContent = 'الدقة: ' + acc + '%  (إصابات ' + hits + ' / أخطاء ' + misses + ')';
-            byId('rRt').textContent = 'متوسط زمن الاستجابة: ' + avg + ' ملي ثانية';
-            byId('rCombo').textContent = 'أعلى كومبو: ' + bestCombo;
-            show('result');
-          }
-          toMenu();
-          </script>
-          </body>
-          </html>
-                  """.trimIndent()
-              }
-          }
-          EOF
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: 8.7
-
-      - name: Build with Gradle
+      - name: Write Flutter App (lib/main.dart)
         run: |
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-          gradle assembleDebug --no-daemon --stacktrace
+          cat << 'EOF' > app_build/lib/main.dart
+          // HotGate – hotspot control per device / per app.  REQUIRES ROOT (Magisk).
+          import 'dart:async';
+          import 'dart:convert';
+          import 'dart:io';
+          import 'dart:typed_data';
+          import 'package:flutter/material.dart';
+          import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+          import 'package:permission_handler/permission_handler.dart';
+
+          // ============================ Shared files (UI <-> service isolate) ============================
+          String get _dir => Directory.systemTemp.path;
+          File get _cfgF => File('$_dir/hotgate_cfg.json');
+          File get _stF => File('$_dir/hotgate_status.json');
+          File get _useF => File('$_dir/hotgate_usage.json');
+
+          Map<String, dynamic> _readJson(File f) {
+            try {
+              return Map<String, dynamic>.from(jsonDecode(f.readAsStringSync()) as Map);
+            } catch (_) {
+              return <String, dynamic>{};
+            }
+          }
+
+          // ============================ Apps catalog ============================
+          class AppDef {
+            final String id, name;
+            final List<String> domains, cidrs;
+            const AppDef(this.id, this.name, this.domains, [this.cidrs = const []]);
+          }
+
+          const builtin = <AppDef>[
+            AppDef('whatsapp', 'WhatsApp', ['whatsapp.net', 'whatsapp.com', 'wa.me']),
+            AppDef('instagram', 'Instagram', ['instagram.com', 'cdninstagram.com', 'fbcdn.net']),
+            AppDef('facebook', 'Facebook / Messenger', ['facebook.com', 'facebook.net', 'fbcdn.net', 'fb.com', 'fbsbx.com', 'messenger.com']),
+            AppDef('youtube', 'YouTube', ['youtube.com', 'googlevideo.com', 'ytimg.com', 'youtu.be', 'ggpht.com', 'youtube-nocookie.com']),
+            AppDef('tiktok', 'TikTok', ['tiktok.com', 'tiktokcdn.com', 'tiktokv.com', 'byteoversea.com', 'ibytedtos.com', 'muscdn.com']),
+            AppDef('telegram', 'Telegram', ['telegram.org', 't.me', 'telegram.me', 'cdn-telegram.org'],
+                ['149.154.160.0/20', '91.108.4.0/22', '91.108.8.0/22', '91.108.12.0/22', '91.108.16.0/22', '91.108.56.0/22']),
+            AppDef('snapchat', 'Snapchat', ['snapchat.com', 'sc-cdn.net', 'sc-gw.com', 'snapkit.com']),
+            AppDef('x', 'X (Twitter)', ['twitter.com', 'x.com', 'twimg.com', 't.co']),
+            AppDef('netflix', 'Netflix', ['netflix.com', 'nflxvideo.net', 'nflximg.net', 'nflxext.com', 'nflxso.net']),
+            AppDef('spotify', 'Spotify', ['spotify.com', 'scdn.co', 'spotifycdn.com']),
+            AppDef('discord', 'Discord', ['discord.com', 'discordapp.com', 'discord.gg', 'discordapp.net']),
+            AppDef('zoom', 'Zoom', ['zoom.us', 'zoomgov.com']),
+            AppDef('google', 'Google (Search / Maps)', ['google.com', 'gstatic.com', 'googleapis.com', 'gvt1.com', 'googleusercontent.com']),
+          ];
+
+          // always allowed, so the phone still shows "connected" (internet check)
+          const sysDomains = [
+            'connectivitycheck.gstatic.com', 'connectivitycheck.android.com', 'clients3.google.com',
+            'captive.apple.com', 'www.msftconnecttest.com', 'detectportal.firefox.com',
+          ];
+
+          // ============================ Root shell ============================
+          class RootShell {
+            Process? _p;
+            final StringBuffer _buf = StringBuffer();
+            Completer<String>? _cur;
+            String _end = '';
+            int _n = 0;
+            Future<dynamic> _last = Future.value();
+
+            Future<bool> start() async {
+              try {
+                _p = await Process.start('su', []);
+                _p!.stdout.transform(utf8.decoder).listen(_on);
+                _p!.stderr.drain();
+                return true;
+              } catch (_) {
+                return false;
+              }
+            }
+
+            void _on(String s) {
+              _buf.write(s);
+              if (_cur != null && _buf.toString().contains(_end)) {
+                final t = _buf.toString();
+                final c = _cur!;
+                _cur = null;
+                c.complete(t.substring(0, t.indexOf(_end)));
+              }
+            }
+
+            Future<String> run(String cmd) {
+              final r = _last.then((_) => _exec(cmd));
+              _last = r.catchError((_) => '');
+              return r;
+            }
+
+            Future<String> _exec(String cmd) {
+              _end = '__END${_n++}__';
+              final c = Completer<String>();
+              _cur = c;
+              _buf.clear();
+              _p!.stdin.writeln('$cmd 2>&1; echo $_end');
+              return c.future.timeout(const Duration(seconds: 20), onTimeout: () {
+                _cur = null;
+                return '';
+              });
+            }
+
+            void close() {
+              try {
+                _p?.stdin.writeln('exit');
+                _p?.kill();
+              } catch (_) {}
+            }
+          }
+
+          // ============================ Engine (runs inside the foreground service) ============================
+          class Rt {
+            String ip, dev;
+            String mode = '', state = '';
+            int seen = 0;
+            final Map<String, List<String>> dels = {};
+            final Map<String, Set<String>> ips = {};
+            final Set<String> cidr = {};
+            Rt(this.ip, this.dev);
+          }
+
+          class Eff {
+            final String mode, reason;
+            final Set<String> apps;
+            Eff(this.mode, this.apps, this.reason);
+          }
+
+          class Engine {
+            final sh = RootShell();
+            String ipt = 'iptables', ip6 = 'ip6tables', up = '';
+            RawDatagramSocket? dns;
+            Map<String, dynamic> cfg = {}, usage = {};
+            final Map<String, Rt> rt = {};
+            final Map<String, int> lastSum = {};
+            final Map<String, String> leases = {};
+            bool busy = false, rootOk = false;
+
+            String get today {
+              final n = DateTime.now();
+              return '${n.year}-${n.month.toString().padLeft(2, '0')}-${n.day.toString().padLeft(2, '0')}';
+            }
+
+            Future<void> start() async {
+              usage = _readJson(_useF);
+              rootOk = await sh.start();
+              if (rootOk) rootOk = (await sh.run('id -u')).trim() == '0';
+              if (!rootOk) {
+                _writeAll();
+                return;
+              }
+              if ((await sh.run('iptables -w -L -n >/dev/null 2>&1 && echo W')).contains('W')) {
+                ipt = 'iptables -w';
+                ip6 = 'ip6tables -w';
+              }
+              await sh.run('$ipt -N DLY_FWD; $ipt -F DLY_FWD; $ipt -C FORWARD -j DLY_FWD 2>/dev/null || $ipt -I FORWARD 1 -j DLY_FWD');
+              await sh.run('$ipt -t nat -N DLY_NAT; $ipt -t nat -F DLY_NAT; $ipt -t nat -C PREROUTING -j DLY_NAT 2>/dev/null || $ipt -t nat -I PREROUTING 1 -j DLY_NAT');
+              await sh.run('$ipt -C INPUT -p udp --dport 5353 -j ACCEPT 2>/dev/null || $ipt -I INPUT 1 -p udp --dport 5353 -j ACCEPT');
+              await sh.run('$ip6 -N DLY6; $ip6 -F DLY6; $ip6 -C FORWARD -j DLY6 2>/dev/null || $ip6 -I FORWARD 1 -j DLY6');
+              dns = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 5353);
+              dns!.listen((e) {
+                if (e == RawSocketEvent.read) {
+                  final d = dns!.receive();
+                  if (d != null) _onDns(d);
+                }
+              });
+            }
+
+            Future<void> stop() async {
+              dns?.close();
+              if (rootOk) {
+                await sh.run('$ipt -D FORWARD -j DLY_FWD; $ipt -F DLY_FWD; $ipt -X DLY_FWD; '
+                    '$ipt -t nat -D PREROUTING -j DLY_NAT; $ipt -t nat -F DLY_NAT; $ipt -t nat -X DLY_NAT; '
+                    '$ipt -D INPUT -p udp --dport 5353 -j ACCEPT; '
+                    '$ip6 -D FORWARD -j DLY6; $ip6 -F DLY6; $ip6 -X DLY6');
+              }
+              sh.close();
+              try {
+                _stF.writeAsStringSync(jsonEncode({'ts': 0, 'root': rootOk, 'clients': []}));
+              } catch (_) {}
+            }
+
+            // ---------- policy ----------
+            Map<String, dynamic> _pol(String mac) {
+              final c = (cfg['clients'] as Map?)?[mac];
+              return c == null ? <String, dynamic>{} : Map<String, dynamic>.from(c as Map);
+            }
+
+            Map<String, dynamic> _dayOf(String mac) {
+              final d = (usage[today] as Map?)?[mac];
+              return d == null ? <String, dynamic>{} : Map<String, dynamic>.from(d as Map);
+            }
+
+            int _total(String mac) => _dayOf(mac).values.fold<int>(0, (a, b) => a + (b as num).toInt());
+
+            Eff _eff(String mac) {
+              final p = _pol(mac);
+              if (p['blocked'] == true) return Eff('res', {}, 'blocked');
+              final tm = (p['totalMb'] as num?)?.toInt() ?? 0;
+              if (tm > 0 && _total(mac) >= tm * 1048576) return Eff('res', {}, 'total');
+              if (p['all'] == true) return Eff('open', {}, '');
+              final day = _dayOf(mac);
+              final am = (p['appMb'] as Map?) ?? {};
+              final apps = <String>{};
+              for (final a in (p['apps'] as List?) ?? []) {
+                final lim = (am[a] as num?)?.toInt() ?? 0;
+                final used = (day[a] as num?)?.toInt() ?? 0;
+                if (lim > 0 && used >= lim * 1048576) continue;
+                apps.add(a as String);
+              }
+              return Eff('res', apps, '');
+            }
+
+            List<AppDef> allApps() {
+              final out = <AppDef>[...builtin];
+              ((cfg['custom'] as Map?) ?? {}).forEach((k, v) {
+                out.add(AppDef(k as String, (v as Map)['name'] as String, List<String>.from(v['domains'] as List)));
+              });
+              return out;
+            }
+
+            String? _owner(String name, Set<String> allowed) {
+              bool m(String d) => name == d || name.endsWith('.$d');
+              if (sysDomains.any(m)) return 'sys';
+              for (final a in allApps()) {
+                if (allowed.contains(a.id) && a.domains.any(m)) return a.id;
+              }
+              return null;
+            }
+
+            // ---------- iptables helpers ----------
+            List<String> _allow(String mac, String cip, String app, {String? rip}) {
+              final cm = '-m comment --comment "$mac|$app"';
+              final o = rip == null ? '-s $cip' : '-s $cip -d $rip';
+              final i = rip == null ? '-d $cip' : '-d $cip -s $rip';
+              return [
+                '$ipt -I DLY_FWD 1 $o $cm -j RETURN; $ipt -I DLY_FWD 1 $i $cm -j RETURN',
+                '$ipt -D DLY_FWD $o $cm -j RETURN; $ipt -D DLY_FWD $i $cm -j RETURN',
+              ];
+            }
+
+            Future<void> _reset(String mac) async {
+              final r = rt[mac];
+              if (r == null) return;
+              final cmds = <String>[];
+              for (final l in r.dels.values) {
+                cmds.addAll(l);
+              }
+              r.dels.clear();
+              r.ips.clear();
+              r.cidr.clear();
+              r.mode = '';
+              if (cmds.isNotEmpty) await sh.run(cmds.join('; '));
+            }
+
+            Future<void> _allowIp(String mac, String app, String rip) async {
+              final r = rt[mac];
+              if (r == null || r.mode != 'res') return;
+              if (!r.ips.putIfAbsent(app, () => <String>{}).add(rip)) return;
+              final p = _allow(mac, r.ip, app, rip: rip);
+              await sh.run(p[0]);
+              (r.dels[app] ??= <String>[]).add(p[1]);
+            }
+
+            Future<void> _enforce(String mac) async {
+              final r = rt[mac];
+              if (r == null) return;
+              final e = _eff(mac);
+              if (r.mode != e.mode) {
+                await _reset(mac);
+                r.mode = e.mode;
+                if (e.mode == 'open') {
+                  final p = _allow(mac, r.ip, '*');
+                  await sh.run(p[0]);
+                  r.dels['base'] = [p[1]];
+                } else {
+                  final add = '$ipt -A DLY_FWD -s ${r.ip} -j REJECT; $ipt -A DLY_FWD -d ${r.ip} -j DROP; '
+                      '$ipt -t nat -A DLY_NAT -s ${r.ip} -p udp --dport 53 -j REDIRECT --to-ports 5353; '
+                      '$ip6 -A DLY6 -m mac --mac-source $mac -j DROP';
+                  final del = '$ipt -D DLY_FWD -s ${r.ip} -j REJECT; $ipt -D DLY_FWD -d ${r.ip} -j DROP; '
+                      '$ipt -t nat -D DLY_NAT -s ${r.ip} -p udp --dport 53 -j REDIRECT --to-ports 5353; '
+                      '$ip6 -D DLY6 -m mac --mac-source $mac -j DROP';
+                  await sh.run(add);
+                  r.dels['base'] = [del];
+                }
+              }
+              if (e.mode == 'res') {
+                for (final g in r.dels.keys.toList()) {
+                  if (g == 'base' || g == 'sys') continue;
+                  if (!e.apps.contains(g)) {
+                    final c = r.dels.remove(g)!;
+                    r.ips.remove(g);
+                    r.cidr.remove(g);
+                    await sh.run(c.join('; '));
+                  }
+                }
+                for (final a in allApps()) {
+                  if (!e.apps.contains(a.id) || a.cidrs.isEmpty || r.cidr.contains(a.id)) continue;
+                  r.cidr.add(a.id);
+                  for (final c in a.cidrs) {
+                    final p = _allow(mac, r.ip, a.id, rip: c);
+                    await sh.run(p[0]);
+                    (r.dels[a.id] ??= <String>[]).add(p[1]);
+                  }
+                }
+              }
+            }
+
+            // ---------- clients ----------
+            Future<void> _scan() async {
+              final out = await sh.run('ip route get 8.8.8.8; echo ==N; ip neigh show; echo ==L; cat /data/misc/dhcp/dnsmasq.leases');
+              final parts = out.split('==N');
+              up = RegExp(r'dev (\S+)').firstMatch(parts[0])?.group(1) ?? '';
+              final rest = parts.length > 1 ? parts[1].split('==L') : [''];
+              if (rest.length > 1) {
+                for (final l in rest[1].split('\n')) {
+                  final f = l.trim().split(' ');
+                  if (f.length >= 4) leases[f[1].toLowerCase()] = f[3] == '*' ? '' : f[3];
+                }
+              }
+              final nowMs = DateTime.now().millisecondsSinceEpoch;
+              for (final l in rest[0].split('\n')) {
+                final m = RegExp(r'^(\d+\.\d+\.\d+\.\d+) dev (\S+) lladdr ([0-9a-fA-F:]{17}) (\w+)').firstMatch(l.trim());
+                if (m == null) continue;
+                final ip = m.group(1)!, dev = m.group(2)!, mac = m.group(3)!.toLowerCase(), st = m.group(4)!;
+                if (dev == up || dev == 'lo' || st == 'FAILED') continue;
+                final ex = rt[mac];
+                if (ex == null) {
+                  rt[mac] = Rt(ip, dev);
+                } else if (ex.ip != ip) {
+                  await _reset(mac);
+                  ex.ip = ip;
+                }
+                final x = rt[mac]!;
+                x.dev = dev;
+                x.state = st;
+                x.seen = nowMs;
+              }
+              for (final mac in rt.keys.toList()) {
+                if (nowMs - rt[mac]!.seen > 600000) {
+                  await _reset(mac);
+                  rt.remove(mac);
+                }
+              }
+            }
+
+            String? _macOf(String ip) {
+              for (final e in rt.entries) {
+                if (e.value.ip == ip) return e.key;
+              }
+              return null;
+            }
+
+            // ---------- usage counters ----------
+            Future<void> _counters() async {
+              final out = await sh.run('$ipt -nvx -L DLY_FWD');
+              final sum = <String, int>{};
+              final re = RegExp(r'^\s*\d+\s+(\d+)\s+.*/\* (.+?) \*/');
+              for (final l in out.split('\n')) {
+                final m = re.firstMatch(l);
+                if (m == null) continue;
+                sum[m.group(2)!] = (sum[m.group(2)!] ?? 0) + int.parse(m.group(1)!);
+              }
+              final day = (usage[today] ??= <String, dynamic>{}) as Map<String, dynamic>;
+              sum.forEach((k, v) {
+                final prev = lastSum[k] ?? 0;
+                final d = v >= prev ? v - prev : v;
+                lastSum[k] = v;
+                if (d <= 0) return;
+                final p = k.split('|');
+                if (p.length != 2) return;
+                final m = (day[p[0]] ??= <String, dynamic>{}) as Map<String, dynamic>;
+                m[p[1]] = ((m[p[1]] as num?) ?? 0).toInt() + d;
+              });
+              lastSum.removeWhere((k, _) => !sum.containsKey(k));
+              if (usage.length > 40) {
+                final keys = usage.keys.toList()..sort();
+                for (final k in keys.take(usage.length - 40)) {
+                  usage.remove(k);
+                }
+              }
+            }
+
+            // ---------- main tick ----------
+            Future<void> tick() async {
+              if (busy || !rootOk) return;
+              busy = true;
+              try {
+                cfg = _readJson(_cfgF);
+                await _scan();
+                await _counters();
+                for (final mac in rt.keys.toList()) {
+                  await _enforce(mac);
+                }
+                _writeAll();
+              } catch (_) {
+              } finally {
+                busy = false;
+              }
+            }
+
+            void _writeAll() {
+              final clients = <Map<String, dynamic>>[];
+              var total = 0, online = 0;
+              rt.forEach((mac, r) {
+                final e = _eff(mac);
+                final on = r.state == 'REACHABLE' || r.state == 'DELAY' || r.state == 'PROBE';
+                if (on) online++;
+                total += _total(mac);
+                clients.add({
+                  'mac': mac, 'ip': r.ip, 'online': on, 'host': leases[mac] ?? '',
+                  'mode': e.mode, 'reason': e.reason, 'today': _dayOf(mac), 'allowed': e.apps.toList(),
+                });
+              });
+              try {
+                _stF.writeAsStringSync(jsonEncode({
+                  'ts': DateTime.now().millisecondsSinceEpoch, 'root': rootOk, 'up': up, 'clients': clients,
+                }));
+                _useF.writeAsStringSync(jsonEncode(usage));
+                FlutterForegroundTask.updateService(
+                  notificationTitle: 'HotGate',
+                  notificationText: '$online online • ${fmt(total)}',
+                );
+              } catch (_) {}
+            }
+
+            // ---------- DNS filter ----------
+            Uint8List _reply(Uint8List q, int qEnd, int rcode) {
+              final r = Uint8List.fromList(q.sublist(0, qEnd));
+              r[2] = 0x81;
+              r[3] = 0x80 | rcode;
+              r[4] = 0;
+              r[5] = 1;
+              for (var i = 6; i < 12; i++) {
+                r[i] = 0;
+              }
+              return r;
+            }
+
+            int _skipName(Uint8List r, int i) {
+              while (i < r.length) {
+                final l = r[i];
+                if (l == 0) return i + 1;
+                if ((l & 0xC0) == 0xC0) return i + 2;
+                i += l + 1;
+              }
+              return i;
+            }
+
+            List<String> _parseA(Uint8List r) {
+              final out = <String>[];
+              if (r.length < 12) return out;
+              final qd = (r[4] << 8) | r[5], an = (r[6] << 8) | r[7];
+              var i = 12;
+              for (var k = 0; k < qd; k++) {
+                i = _skipName(r, i) + 4;
+              }
+              for (var k = 0; k < an && i < r.length; k++) {
+                i = _skipName(r, i);
+                if (i + 10 > r.length) break;
+                final t = (r[i] << 8) | r[i + 1];
+                final rd = (r[i + 8] << 8) | r[i + 9];
+                i += 10;
+                if (t == 1 && rd == 4 && i + 4 <= r.length) out.add('${r[i]}.${r[i + 1]}.${r[i + 2]}.${r[i + 3]}');
+                i += rd;
+              }
+              return out;
+            }
+
+            Future<Uint8List?> _forward(Uint8List q) async {
+              for (final host in ['1.1.1.1', '8.8.8.8']) {
+                RawDatagramSocket? s;
+                try {
+                  s = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+                  final c = Completer<Uint8List?>();
+                  final sock = s;
+                  final sub = sock.listen((e) {
+                    if (e == RawSocketEvent.read) {
+                      final d = sock.receive();
+                      if (d != null && !c.isCompleted) c.complete(d.data);
+                    }
+                  });
+                  sock.send(q, InternetAddress(host), 53);
+                  final r = await c.future.timeout(const Duration(seconds: 3), onTimeout: () => null);
+                  await sub.cancel();
+                  if (r != null) return r;
+                } catch (_) {
+                } finally {
+                  s?.close();
+                }
+              }
+              return null;
+            }
+
+            Future<void> _onDns(Datagram dg) async {
+              try {
+                final q = dg.data;
+                if (q.length < 17) return;
+                var i = 12;
+                final labels = <String>[];
+                while (i < q.length && q[i] != 0) {
+                  final l = q[i];
+                  if ((l & 0xC0) != 0 || i + 1 + l > q.length) return;
+                  labels.add(String.fromCharCodes(q.sublist(i + 1, i + 1 + l)));
+                  i += l + 1;
+                }
+                if (i + 5 > q.length) return;
+                final name = labels.join('.').toLowerCase();
+                final qtype = (q[i + 1] << 8) | q[i + 2];
+                final qEnd = i + 5;
+                final cip = dg.address.address;
+                var mac = _macOf(cip);
+                if (mac == null) {
+                  await _scan();
+                  mac = _macOf(cip);
+                }
+                if (mac == null) return;
+                if (rt[mac]!.mode.isEmpty) await _enforce(mac);
+                void send(Uint8List b) => dns?.send(b, dg.address, dg.port);
+                if (qtype == 28) {
+                  send(_reply(q, qEnd, 0)); // no IPv6 for filtered clients
+                  return;
+                }
+                final e = _eff(mac);
+                String? app = e.mode == 'open' ? '*' : _owner(name, e.apps);
+                if (app == null) {
+                  send(_reply(q, qEnd, 3)); // NXDOMAIN
+                  return;
+                }
+                final r = await _forward(q);
+                if (r == null) return;
+                if (e.mode == 'res') {
+                  for (final ip in _parseA(r)) {
+                    await _allowIp(mac, app, ip);
+                  }
+                }
+                send(r);
+              } catch (_) {}
+            }
+          }
+
+          // ============================ Foreground service ============================
+          @pragma('vm:entry-point')
+          void startCallback() {
+            FlutterForegroundTask.setTaskHandler(ShareHandler());
+          }
+
+          class ShareHandler extends TaskHandler {
+            final Engine eng = Engine();
+            @override
+            Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+              await eng.start();
+            }
+
+            @override
+            void onRepeatEvent(DateTime timestamp) {
+              eng.tick();
+            }
+
+            @override
+            Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
+              await eng.stop();
+            }
+          }
+
+          // ============================ Formatting + i18n ============================
+          String fmt(num b) {
+            if (b < 1024) return '${b.toInt()} B';
+            const u = ['KB', 'MB', 'GB', 'TB'];
+            double v = b / 1024;
+            int i = 0;
+            while (v >= 1024 && i < 3) {
+              v /= 1024;
+              i++;
+            }
+            return '${v.toStringAsFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2)} ${u[i]}';
+          }
+
+          const langs = {'ar': 'العربية', 'en': 'English'};
+
+          const _tr = <String, Map<String, String>>{
+            'en': {
+              'devices': 'Devices', 'apps': 'Apps', 'engine': 'Control engine', 'on': 'Running', 'off': 'Stopped',
+              'needroot': 'Root access is required (Magisk). Grant it and try again.',
+              'hs': 'Hotspot settings', 'none': 'No devices connected', 'nonehint': 'Start the engine, then turn on your hotspot. New devices get NO internet until you allow apps for them.',
+              'today': 'Today', 'week': '7 days', 'sel': 'Selected apps', 'all': 'All apps', 'blocked': 'Cut internet',
+              'limhit': 'Limit reached', 'tl': 'Daily total limit', 'al': 'Daily app limit', 'nolim': 'No limit',
+              'rename': 'Rename', 'name': 'Name', 'save': 'Save', 'cancel': 'Cancel', 'add': 'Add app', 'appname': 'App name',
+              'dom': 'Domains, comma separated (e.g. example.com, cdn.example.com)', 'del': 'Delete',
+              'allowed': 'Allowed apps', 'bykind': 'Usage by app', 'sys': 'System / checks', 'star': 'All traffic',
+              'allnote': 'All apps are open. Only the total daily limit applies.', 'mb': 'Limit in MB (0 = none)',
+              'lang': 'Language', 'chooselang': 'Choose your language', 'online': 'online', 'offline': 'idle',
+              'custom': 'Custom apps', 'builtin': 'Built-in apps', 'start': 'Start', 'stop': 'Stop', 'capped': 'capped',
+            },
+            'ar': {
+              'devices': 'الأجهزة', 'apps': 'التطبيقات', 'engine': 'محرك التحكم', 'on': 'يعمل', 'off': 'متوقف',
+              'needroot': 'يتطلب صلاحية root (Magisk). امنحها ثم أعد المحاولة.',
+              'hs': 'إعدادات نقطة الاتصال', 'none': 'لا توجد أجهزة متصلة', 'nonehint': 'شغّل المحرك ثم فعّل نقطة الاتصال. الأجهزة الجديدة لا تحصل على إنترنت حتى تسمح لها بتطبيقات.',
+              'today': 'اليوم', 'week': '7 أيام', 'sel': 'تطبيقات محددة', 'all': 'كل التطبيقات', 'blocked': 'قطع الإنترنت',
+              'limhit': 'وصل للحد', 'tl': 'الحد اليومي الإجمالي', 'al': 'الحد اليومي للتطبيق', 'nolim': 'بدون حد',
+              'rename': 'إعادة تسمية', 'name': 'الاسم', 'save': 'حفظ', 'cancel': 'إلغاء', 'add': 'إضافة تطبيق', 'appname': 'اسم التطبيق',
+              'dom': 'النطاقات مفصولة بفاصلة (مثل example.com, cdn.example.com)', 'del': 'حذف',
+              'allowed': 'التطبيقات المسموحة', 'bykind': 'الاستهلاك حسب التطبيق', 'sys': 'النظام / فحص الاتصال', 'star': 'كل البيانات',
+              'allnote': 'كل التطبيقات مفتوحة. يعمل فقط الحد اليومي الإجمالي.', 'mb': 'الحد بالميجابايت (0 = بدون)',
+              'lang': 'اللغة', 'chooselang': 'اختر لغتك', 'online': 'متصل', 'offline': 'خامل',
+              'custom': 'تطبيقات مخصصة', 'builtin': 'تطبيقات جاهزة', 'start': 'تشغيل', 'stop': 'إيقاف', 'capped': 'وصل للحد',
+            },
+          };
+
+          // ============================ UI state ============================
+          const kBg = Color(0xFF0A0E1A), kCard = Color(0xFF141A2B), kAcc = Color(0xFF7C5CFF);
+          const kOk = Color(0xFF2EE6A6), kWarn = Color(0xFFFFB04C), kRed = Color(0xFFFF5C7A);
+
+          class Store extends ChangeNotifier {
+            Map<String, dynamic> cfg = {}, status = {}, usage = {};
+            bool? root;
+            bool running = false;
+            String lang = '';
+            Timer? _t;
+
+            String t(String k) => (_tr[lang] ?? _tr['en']!)[k] ?? k;
+            bool get rtl => lang == 'ar';
+
+            void init() {
+              cfg = _readJson(_cfgF);
+              lang = (cfg['lang'] as String?) ?? '';
+              refresh();
+              _t = Timer.periodic(const Duration(seconds: 2), (_) => refresh());
+            }
+
+            Future<void> refresh() async {
+              status = _readJson(_stF);
+              usage = _readJson(_useF);
+              running = await FlutterForegroundTask.isRunningService;
+              notifyListeners();
+            }
+
+            void save() {
+              cfg['lang'] = lang;
+              try {
+                _cfgF.writeAsStringSync(jsonEncode(cfg));
+              } catch (_) {}
+              notifyListeners();
+            }
+
+            void setLang(String l) {
+              lang = l;
+              save();
+            }
+
+            Map<String, dynamic> pol(String mac) {
+              final cs = (cfg['clients'] ??= <String, dynamic>{}) as Map<String, dynamic>;
+              return (cs[mac] ??= <String, dynamic>{
+                'all': false, 'apps': <dynamic>[], 'totalMb': 0, 'appMb': <String, dynamic>{}, 'blocked': false, 'name': '',
+              }) as Map<String, dynamic>;
+            }
+
+            List<AppDef> allApps() {
+              final out = <AppDef>[...builtin];
+              ((cfg['custom'] as Map?) ?? {}).forEach((k, v) {
+                out.add(AppDef(k as String, (v as Map)['name'] as String, List<String>.from(v['domains'] as List)));
+              });
+              return out;
+            }
+
+            String appName(String id) {
+              if (id == 'sys') return t('sys');
+              if (id == '*') return t('star');
+              for (final a in allApps()) {
+                if (a.id == id) return a.name;
+              }
+              return id;
+            }
+
+            List<Map<String, dynamic>> get clients =>
+                ((status['clients'] as List?) ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+
+            Map<String, dynamic>? client(String mac) {
+              for (final c in clients) {
+                if (c['mac'] == mac) return c;
+              }
+              return null;
+            }
+
+            String nameOf(String mac, [String host = '']) {
+              final n = ((cfg['clients'] as Map?)?[mac] as Map?)?['name'] as String? ?? '';
+              if (n.isNotEmpty) return n;
+              if (host.isNotEmpty) return host;
+              return 'Device ${mac.substring(12)}';
+            }
+
+            int weekTotal(String mac) {
+              final keys = usage.keys.toList()..sort();
+              var s = 0;
+              for (final k in keys.reversed.take(7)) {
+                final m = (usage[k] as Map?)?[mac] as Map?;
+                if (m != null) s += m.values.fold<int>(0, (a, b) => a + (b as num).toInt());
+              }
+              return s;
+            }
+
+            Future<bool> checkRoot() async {
+              try {
+                final r = await Process.run('su', ['-c', 'id -u']);
+                root = r.stdout.toString().trim() == '0';
+              } catch (_) {
+                root = false;
+              }
+              notifyListeners();
+              return root == true;
+            }
+
+            Future<void> start() async {
+              if (!await checkRoot()) return;
+              await Permission.notification.request();
+              save();
+              await FlutterForegroundTask.startService(
+                serviceId: 301,
+                notificationTitle: 'HotGate',
+                notificationText: '...',
+                callback: startCallback,
+              );
+              await refresh();
+            }
+
+            Future<void> stop() async {
+              await FlutterForegroundTask.stopService();
+              await refresh();
+            }
+          }
+
+          final store = Store();
+
+          // ============================ App ============================
+          void main() {
+            WidgetsFlutterBinding.ensureInitialized();
+            FlutterForegroundTask.initCommunicationPort();
+            runApp(const HotGateApp());
+          }
+
+          class HotGateApp extends StatelessWidget {
+            const HotGateApp({super.key});
+            @override
+            Widget build(BuildContext context) => MaterialApp(
+                  debugShowCheckedModeBanner: false,
+                  title: 'HotGate',
+                  theme: ThemeData(
+                    useMaterial3: true,
+                    brightness: Brightness.dark,
+                    scaffoldBackgroundColor: kBg,
+                    colorScheme: const ColorScheme.dark(primary: kAcc, surface: kCard),
+                  ),
+                  home: const Shell(),
+                );
+          }
+
+          class Shell extends StatefulWidget {
+            const Shell({super.key});
+            @override
+            State<Shell> createState() => _ShellState();
+          }
+
+          class _ShellState extends State<Shell> {
+            int tab = 0;
+
+            @override
+            void initState() {
+              super.initState();
+              FlutterForegroundTask.init(
+                androidNotificationOptions: AndroidNotificationOptions(
+                  channelId: 'hotgate_engine',
+                  channelName: 'HotGate',
+                  channelImportance: NotificationChannelImportance.LOW,
+                  priority: NotificationPriority.LOW,
+                ),
+                iosNotificationOptions: const IOSNotificationOptions(showNotification: false),
+                foregroundTaskOptions: ForegroundTaskOptions(
+                  eventAction: ForegroundTaskEventAction.repeat(3000),
+                  autoRunOnBoot: false,
+                  allowWakeLock: true,
+                  allowWifiLock: true,
+                ),
+              );
+              store.init();
+              store.checkRoot();
+            }
+
+            @override
+            Widget build(BuildContext context) => AnimatedBuilder(
+                  animation: store,
+                  builder: (c, _) {
+                    if (store.lang.isEmpty) return const LangScreen();
+                    return Directionality(
+                      textDirection: store.rtl ? TextDirection.rtl : TextDirection.ltr,
+                      child: Scaffold(
+                        body: SafeArea(child: tab == 0 ? const DevicesTab() : const AppsTab()),
+                        bottomNavigationBar: NavigationBar(
+                          backgroundColor: kCard,
+                          selectedIndex: tab,
+                          onDestinationSelected: (i) => setState(() => tab = i),
+                          destinations: [
+                            NavigationDestination(icon: const Icon(Icons.devices_rounded), label: store.t('devices')),
+                            NavigationDestination(icon: const Icon(Icons.apps_rounded), label: store.t('apps')),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                );
+          }
+
+          class LangScreen extends StatelessWidget {
+            const LangScreen({super.key});
+            @override
+            Widget build(BuildContext context) => Scaffold(
+                  body: SafeArea(
+                    child: Column(children: [
+                      const SizedBox(height: 40),
+                      _logo(),
+                      const SizedBox(height: 16),
+                      const Text('HotGate', style: TextStyle(fontSize: 32, fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 6),
+                      const Text('Choose your language • اختر لغتك', style: TextStyle(color: Colors.white60)),
+                      const SizedBox(height: 16),
+                      for (final e in langs.entries) ListTile(title: Text(e.value), onTap: () => store.setLang(e.key)),
+                    ]),
+                  ),
+                );
+          }
+
+          Widget _logo() => Container(
+                padding: const EdgeInsets.all(24),
+                decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [kAcc, kOk])),
+                child: const Icon(Icons.wifi_tethering_rounded, size: 48, color: Colors.white),
+              );
+
+          Widget _avatar(String name, [double r = 20]) {
+            final c = HSLColor.fromAHSL(1, (name.hashCode % 360).abs().toDouble(), .55, .55).toColor();
+            return CircleAvatar(
+              radius: r,
+              backgroundColor: c.withOpacity(.22),
+              child: Text(name.isEmpty ? '?' : name.characters.first.toUpperCase(),
+                  style: TextStyle(color: c, fontWeight: FontWeight.w800)),
+            );
+          }
+
+          Future<void> _numDialog(BuildContext c, String title, int init, void Function(int) onSave) async {
+            final ctl = TextEditingController(text: init == 0 ? '' : '$init');
+            await showDialog(
+              context: c,
+              builder: (d) => Directionality(
+                textDirection: store.rtl ? TextDirection.rtl : TextDirection.ltr,
+                child: AlertDialog(
+                  backgroundColor: kCard,
+                  title: Text(title),
+                  content: TextField(
+                    controller: ctl,
+                    autofocus: true,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(hintText: store.t('mb')),
+                  ),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(d), child: Text(store.t('cancel'))),
+                    FilledButton(
+                      onPressed: () {
+                        onSave(int.tryParse(ctl.text.trim()) ?? 0);
+                        Navigator.pop(d);
+                      },
+                      child: Text(store.t('save')),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          // ---------------- Devices tab ----------------
+          class DevicesTab extends StatelessWidget {
+            const DevicesTab({super.key});
+            @override
+            Widget build(BuildContext context) {
+              final t = store.t;
+              final list = store.clients;
+              return ListView(padding: const EdgeInsets.all(20), children: [
+                Row(children: [
+                  ShaderMask(
+                    shaderCallback: (r) => const LinearGradient(colors: [kAcc, kOk]).createShader(r),
+                    child: const Text('HotGate',
+                        style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: Colors.white)),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: t('lang'),
+                    icon: const Icon(Icons.language_rounded, color: Colors.white70),
+                    onPressed: () => showModalBottomSheet(
+                      context: context,
+                      backgroundColor: kCard,
+                      builder: (c) => SafeArea(
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                          for (final e in langs.entries)
+                            ListTile(
+                              title: Text(e.value),
+                              trailing: store.lang == e.key ? const Icon(Icons.check_rounded, color: kOk) : null,
+                              onTap: () {
+                                Navigator.pop(c);
+                                store.setLang(e.key);
+                              },
+                            ),
+                        ]),
+                      ),
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(20)),
+                  child: Column(children: [
+                    Row(children: [
+                      Icon(store.running ? Icons.shield_rounded : Icons.shield_outlined, color: store.running ? kOk : Colors.white38, size: 30),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(t('engine'), style: const TextStyle(fontWeight: FontWeight.w700)),
+                          Text(store.running ? t('on') : t('off'),
+                              style: TextStyle(color: store.running ? kOk : Colors.white54, fontSize: 12)),
+                        ]),
+                      ),
+                      Switch(value: store.running, onChanged: (v) => v ? store.start() : store.stop()),
+                    ]),
+                    if (store.root == false) ...[
+                      const SizedBox(height: 10),
+                      Row(children: [
+                        const Icon(Icons.warning_amber_rounded, color: kWarn, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(t('needroot'), style: const TextStyle(color: kWarn, fontSize: 12))),
+                      ]),
+                    ],
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: TextButton.icon(
+                        onPressed: () => Process.run('su', ['-c', 'am start -n com.android.settings/.TetherSettings']),
+                        icon: const Icon(Icons.settings_rounded, size: 18),
+                        label: Text(t('hs')),
+                      ),
+                    ),
+                  ]),
+                ),
+                const SizedBox(height: 16),
+                if (list.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.all(28),
+                    child: Column(children: [
+                      const Icon(Icons.wifi_off_rounded, size: 44, color: Colors.white24),
+                      const SizedBox(height: 10),
+                      Text(t('none'), style: const TextStyle(fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 6),
+                      Text(t('nonehint'), textAlign: TextAlign.center, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                    ]),
+                  ),
+                for (final cl in list) _tile(context, cl),
+              ]);
+            }
+
+            Widget _tile(BuildContext context, Map<String, dynamic> cl) {
+              final t = store.t;
+              final mac = cl['mac'] as String;
+              final name = store.nameOf(mac, cl['host'] as String);
+              final today = Map<String, dynamic>.from(cl['today'] as Map);
+              final total = today.values.fold<int>(0, (a, b) => a + (b as num).toInt());
+              final reason = cl['reason'] as String;
+              String chip;
+              Color cc;
+              if (reason == 'blocked') {
+                chip = t('blocked');
+                cc = kRed;
+              } else if (reason == 'total') {
+                chip = t('limhit');
+                cc = kWarn;
+              } else if (cl['mode'] == 'open') {
+                chip = t('all');
+                cc = kOk;
+              } else {
+                chip = '${t('sel')} • ${(cl['allowed'] as List).length}';
+                cc = kAcc;
+              }
+              return GestureDetector(
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ClientPage(mac: mac))),
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(18)),
+                  child: Row(children: [
+                    Stack(children: [
+                      _avatar(name, 24),
+                      PositionedDirectional(
+                        end: 0,
+                        bottom: 0,
+                        child: Container(
+                          width: 12,
+                          height: 12,
+                          decoration: BoxDecoration(
+                              color: cl['online'] == true ? kOk : Colors.white24,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: kCard, width: 2)),
+                        ),
+                      ),
+                    ]),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
+                        Text('${cl['ip']}', style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                        const SizedBox(height: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(color: cc.withOpacity(.15), borderRadius: BorderRadius.circular(8)),
+                          child: Text(chip, style: TextStyle(color: cc, fontSize: 11, fontWeight: FontWeight.w600)),
+                        ),
+                      ]),
+                    ),
+                    Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                      Text(fmt(total), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                      Text(t('today'), style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                    ]),
+                  ]),
+                ),
+              );
+            }
+          }
+
+          // ---------------- Client page ----------------
+          class ClientPage extends StatelessWidget {
+            final String mac;
+            const ClientPage({super.key, required this.mac});
+
+            @override
+            Widget build(BuildContext context) => AnimatedBuilder(
+                  animation: store,
+                  builder: (c, _) {
+                    final t = store.t;
+                    final cl = store.client(mac);
+                    final p = store.pol(mac);
+                    final name = store.nameOf(mac, (cl?['host'] as String?) ?? '');
+                    final today = Map<String, dynamic>.from((cl?['today'] as Map?) ?? {});
+                    final total = today.values.fold<int>(0, (a, b) => a + (b as num).toInt());
+                    final all = p['all'] == true;
+                    final tm = (p['totalMb'] as num?)?.toInt() ?? 0;
+                    final appMb = Map<String, dynamic>.from((p['appMb'] as Map?) ?? {});
+                    final sel = List<String>.from((p['apps'] as List?) ?? []);
+                    final allowed = List<String>.from((cl?['allowed'] as List?) ?? []);
+                    void set(void Function() f) {
+                      f();
+                      store.save();
+                    }
+
+                    return Directionality(
+                      textDirection: store.rtl ? TextDirection.rtl : TextDirection.ltr,
+                      child: Scaffold(
+                        appBar: AppBar(
+                          backgroundColor: kBg,
+                          title: Text(name),
+                          actions: [
+                            IconButton(
+                              tooltip: t('rename'),
+                              icon: const Icon(Icons.edit_rounded),
+                              onPressed: () async {
+                                final ctl = TextEditingController(text: p['name'] as String? ?? '');
+                                await showDialog(
+                                  context: context,
+                                  builder: (d) => Directionality(
+                                    textDirection: store.rtl ? TextDirection.rtl : TextDirection.ltr,
+                                    child: AlertDialog(
+                                      backgroundColor: kCard,
+                                      title: Text(t('rename')),
+                                      content: TextField(controller: ctl, autofocus: true, decoration: InputDecoration(hintText: t('name'))),
+                                      actions: [
+                                        TextButton(onPressed: () => Navigator.pop(d), child: Text(t('cancel'))),
+                                        FilledButton(
+                                          onPressed: () {
+                                            set(() => p['name'] = ctl.text.trim());
+                                            Navigator.pop(d);
+                                          },
+                                          child: Text(t('save')),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                        body: ListView(padding: const EdgeInsets.all(20), children: [
+                          // counter
+                          Container(
+                            padding: const EdgeInsets.all(20),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(22),
+                              gradient: LinearGradient(colors: [kAcc.withOpacity(.35), kOk.withOpacity(.2)]),
+                            ),
+                            child: Row(children: [
+                              Expanded(
+                                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                  Text(t('today'), style: const TextStyle(color: Colors.white70)),
+                                  Text(fmt(total), style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w800)),
+                                  if (tm > 0)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 8),
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(6),
+                                        child: LinearProgressIndicator(
+                                            value: (total / (tm * 1048576)).clamp(0, 1).toDouble(),
+                                            minHeight: 6,
+                                            color: total >= tm * 1048576 ? kRed : kOk,
+                                            backgroundColor: Colors.white12),
+                                      ),
+                                    ),
+                                ]),
+                              ),
+                              const SizedBox(width: 16),
+                              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                                Text(t('week'), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                                Text(fmt(store.weekTotal(mac)), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                              ]),
+                            ]),
+                          ),
+                          const SizedBox(height: 16),
+                          SegmentedButton<bool>(
+                            segments: [
+                              ButtonSegment(value: false, label: Text(t('sel')), icon: const Icon(Icons.checklist_rounded)),
+                              ButtonSegment(value: true, label: Text(t('all')), icon: const Icon(Icons.public_rounded)),
+                            ],
+                            selected: {all},
+                            onSelectionChanged: (s) => set(() => p['all'] = s.first),
+                          ),
+                          const SizedBox(height: 8),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(t('blocked')),
+                            secondary: const Icon(Icons.block_rounded, color: kRed),
+                            value: p['blocked'] == true,
+                            onChanged: (v) => set(() => p['blocked'] = v),
+                          ),
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.data_usage_rounded, color: kOk),
+                            title: Text(t('tl')),
+                            subtitle: Text(tm == 0 ? t('nolim') : fmt(tm * 1048576)),
+                            trailing: const Icon(Icons.chevron_right_rounded),
+                            onTap: () => _numDialog(context, t('tl'), tm, (v) => set(() => p['totalMb'] = v)),
+                          ),
+                          const Divider(height: 28),
+                          if (all)
+                            Text(t('allnote'), style: const TextStyle(color: Colors.white54))
+                          else ...[
+                            Text(t('allowed'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                            const SizedBox(height: 8),
+                            for (final a in store.allApps())
+                              _appRow(context, a, sel, allowed, today, appMb, set, p),
+                          ],
+                          if (today.isNotEmpty) ...[
+                            const Divider(height: 28),
+                            Text(t('bykind'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                            const SizedBox(height: 8),
+                            for (final e in (today.entries.toList()..sort((a, b) => (b.value as num).compareTo(a.value as num))))
+                              ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                title: Text(store.appName(e.key)),
+                                trailing: Text(fmt(e.value as num), style: const TextStyle(fontWeight: FontWeight.w700)),
+                              ),
+                          ],
+                        ]),
+                      ),
+                    );
+                  },
+                );
+
+            Widget _appRow(BuildContext context, AppDef a, List<String> sel, List<String> allowed, Map<String, dynamic> today,
+                Map<String, dynamic> appMb, void Function(void Function()) set, Map<String, dynamic> p) {
+              final t = store.t;
+              final on = sel.contains(a.id);
+              final lim = (appMb[a.id] as num?)?.toInt() ?? 0;
+              final used = (today[a.id] as num?)?.toInt() ?? 0;
+              final capped = on && !allowed.contains(a.id) && lim > 0 && used >= lim * 1048576;
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(14)),
+                child: Row(children: [
+                  _avatar(a.name, 18),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(a.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      if (on && (used > 0 || lim > 0))
+                        Text('${fmt(used)}${lim > 0 ? ' / ${fmt(lim * 1048576)}' : ''}${capped ? ' • ${t('capped')}' : ''}',
+                            style: TextStyle(fontSize: 11, color: capped ? kRed : Colors.white54)),
+                    ]),
+                  ),
+                  if (on)
+                    IconButton(
+                      tooltip: t('al'),
+                      icon: Icon(Icons.speed_rounded, color: lim > 0 ? kOk : Colors.white54),
+                      onPressed: () => _numDialog(context, '${t('al')}: ${a.name}', lim, (v) {
+                        set(() {
+                          if (v <= 0) {
+                            appMb.remove(a.id);
+                          } else {
+                            appMb[a.id] = v;
+                          }
+                          p['appMb'] = appMb;
+                        });
+                      }),
+                    ),
+                  Switch(
+                    value: on,
+                    onChanged: (v) => set(() {
+                      final l = List<String>.from(sel);
+                      if (v) {
+                        l.add(a.id);
+                      } else {
+                        l.remove(a.id);
+                      }
+                      p['apps'] = l;
+                    }),
+                  ),
+                ]),
+              );
+            }
+          }
+
+          // ---------------- Apps tab ----------------
+          class AppsTab extends StatelessWidget {
+            const AppsTab({super.key});
+
+            void _add(BuildContext context) {
+              final n = TextEditingController(), d = TextEditingController();
+              final t = store.t;
+              showDialog(
+                context: context,
+                builder: (c) => Directionality(
+                  textDirection: store.rtl ? TextDirection.rtl : TextDirection.ltr,
+                  child: AlertDialog(
+                    backgroundColor: kCard,
+                    title: Text(t('add')),
+                    content: Column(mainAxisSize: MainAxisSize.min, children: [
+                      TextField(controller: n, decoration: InputDecoration(labelText: t('appname'))),
+                      const SizedBox(height: 10),
+                      TextField(controller: d, maxLines: 3, decoration: InputDecoration(labelText: t('dom'))),
+                    ]),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(c), child: Text(t('cancel'))),
+                      FilledButton(
+                        onPressed: () {
+                          final doms = d.text
+                              .split(RegExp(r'[,\s]+'))
+                              .map((e) => e.trim().toLowerCase())
+                              .where((e) => e.contains('.'))
+                              .toList();
+                          if (n.text.trim().isEmpty || doms.isEmpty) return;
+                          final cu = (store.cfg['custom'] ??= <String, dynamic>{}) as Map<String, dynamic>;
+                          cu['c_${DateTime.now().millisecondsSinceEpoch}'] = {'name': n.text.trim(), 'domains': doms};
+                          store.save();
+                          Navigator.pop(c);
+                        },
+                        child: Text(t('save')),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              final t = store.t;
+              final cu = Map<String, dynamic>.from((store.cfg['custom'] as Map?) ?? {});
+              return Scaffold(
+                backgroundColor: Colors.transparent,
+                floatingActionButton: FloatingActionButton.extended(
+                  onPressed: () => _add(context),
+                  icon: const Icon(Icons.add_rounded),
+                  label: Text(t('add')),
+                ),
+                body: ListView(padding: const EdgeInsets.fromLTRB(20, 20, 20, 90), children: [
+                  Text(t('apps'), style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 14),
+                  if (cu.isNotEmpty) ...[
+                    Text(t('custom'), style: const TextStyle(color: Colors.white60)),
+                    const SizedBox(height: 6),
+                    for (final e in cu.entries)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(14)),
+                        child: ListTile(
+                          leading: _avatar((e.value as Map)['name'] as String),
+                          title: Text((e.value as Map)['name'] as String),
+                          subtitle: Text(((e.value as Map)['domains'] as List).join(', '),
+                              maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
+                          trailing: IconButton(
+                            tooltip: t('del'),
+                            icon: const Icon(Icons.delete_outline_rounded, color: kRed),
+                            onPressed: () {
+                              (store.cfg['custom'] as Map).remove(e.key);
+                              store.save();
+                            },
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: 10),
+                  ],
+                  Text(t('builtin'), style: const TextStyle(color: Colors.white60)),
+                  const SizedBox(height: 6),
+                  for (final a in builtin)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(14)),
+                      child: ListTile(
+                        leading: _avatar(a.name),
+                        title: Text(a.name),
+                        subtitle: Text(a.domains.join(', '), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
+                      ),
+                    ),
+                ]),
+              );
+            }
+          }
+          EOF
+
+      - name: Build release APK
+        working-directory: app_build
+        run: |
+          # foreground service + notifications need API 24+
+          sed -i 's/flutter\.minSdkVersion/24/' android/app/build.gradle*
+          flutter pub get
+          flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: AimFox-Overlay-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+          name: hotgate-apk
+          path: app_build/build/app/outputs/flutter-apk/app-release.apk
